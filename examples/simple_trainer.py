@@ -90,7 +90,7 @@ class Config:
     # GSs with scale above this value will be pruned.
     prune_scale3d: float = 0.1
     # Maximum number of GSs.
-    max_num_gaussians: int = 1_000_000
+    cap_max: int = 2_000_000
 
     # Start refining GSs after this iteration
     refine_start_iter: int = 500
@@ -540,7 +540,7 @@ class Runner:
                     self.relocate_gs(dead_mask)
                     
                     # add new GSs
-                    self.add_new_gs(cfg.max_num_gaussians)
+                    self.add_new_gs(cfg.cap_max)
                     print(
                         f"Step {step}: Adding new gaussians. Now having {len(self.splats['means3d'])} GSs."
                     )
