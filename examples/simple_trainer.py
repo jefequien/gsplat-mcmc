@@ -23,14 +23,13 @@ from utils import (
     AppearanceOptModule,
     CameraOptModule,
     knn,
-    normalized_quat_to_rotmat,
     rgb_to_sh,
     set_random_seed,
     build_scaling_rotation,
 )
 
 from gsplat.rendering import rasterization
-from gsplat.cuda._wrapper import compute_relocation_cuda
+from gsplat.relocation import compute_relocation_cuda
 
 
 @dataclass
@@ -101,9 +100,12 @@ class Config:
     refine_every: int = 100
     # Maximum number of GSs.
     cap_max: int = 1_000_000
+    # MCMC samping noise learning rate
     noise_lr = 5e5
-    scale_reg = 0.01
+    # Opacity regularization
     opacity_reg = 0.01
+    # Scale regularization
+    scale_reg = 0.01
 
     # Use packed mode for rasterization, this leads to less memory usage but slightly slower.
     packed: bool = False
@@ -527,9 +529,8 @@ class Runner:
                     self.writer.add_image("train/render", canvas, step)
                 self.writer.flush()
 
-            # update running stats for prunning & growing
+            # edit GSs
             if step < cfg.refine_stop_iter:
-
                 if step > cfg.refine_start_iter and step % cfg.refine_every == 0:
                     # relocate GSs
                     dead_mask = (torch.sigmoid(self.splats["opacities"]) <= 0.005).squeeze(-1)
@@ -539,9 +540,6 @@ class Runner:
                     self.relocate_gs(dead_indices, alive_indices)
                     print(
                         f"Step {step}: Relocated {len(dead_indices)} GSs."
-                    )
-                    self.writer.add_scalar(
-                        "train/reloc_GS", len(dead_indices), step
                     )
                     
                     # add new GSs
