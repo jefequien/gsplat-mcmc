@@ -3,6 +3,7 @@ from typing import Callable, Optional, Tuple
 import torch
 from torch import Tensor
 
+
 def _make_lazy_cuda_func(name: str) -> Callable:
     def call_cuda(*args, **kwargs):
         # pylint: disable=import-outside-toplevel
@@ -11,6 +12,7 @@ def _make_lazy_cuda_func(name: str) -> Callable:
         return getattr(_C, name)(*args, **kwargs)
 
     return call_cuda
+
 
 def spherical_harmonics(
     degrees_to_use: int,
