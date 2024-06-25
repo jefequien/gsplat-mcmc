@@ -68,7 +68,7 @@ class Config:
     save_steps: List[int] = field(default_factory=lambda: [7_000, 30_000])
 
     # Initialization type
-    init_type: str = "random"
+    init_type: str = "sfm"
     # Initialization number of GSs
     init_num_pts: int = 100_000
     # Degree of spherical harmonics
