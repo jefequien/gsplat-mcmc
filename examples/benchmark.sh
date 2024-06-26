@@ -1,4 +1,4 @@
-RESULT_DIR=results/mcmc_random_vary
+RESULT_DIR=results/3dgs_random
 
 for SCENE in bonsai counter garden kitchen room stump bicycle;
 do
@@ -8,26 +8,26 @@ do
         DATA_FACTOR=2
     fi
 
-    if [ "$SCENE" = "bicycle" ] || [ "$SCENE" = "stump" ] || [ "$SCENE" = "garden" ]; then
-        CAP_MAX=2000000
-    elif [ "$SCENE" = "bonsai" ]; then
-        CAP_MAX=1213902
-    elif [ "$SCENE" = "counter" ]; then
-        CAP_MAX=1196698
-    elif [ "$SCENE" = "kitchen" ]; then
-        CAP_MAX=1797459
-    elif [ "$SCENE" = "room" ]; then
-        CAP_MAX=1568227
-    else
-        CAP_MAX=1000000
-    fi
+    # if [ "$SCENE" = "bicycle" ] || [ "$SCENE" = "stump" ] || [ "$SCENE" = "garden" ]; then
+    #     CAP_MAX=2000000
+    # elif [ "$SCENE" = "bonsai" ]; then
+    #     CAP_MAX=1213902
+    # elif [ "$SCENE" = "counter" ]; then
+    #     CAP_MAX=1196698
+    # elif [ "$SCENE" = "kitchen" ]; then
+    #     CAP_MAX=1797459
+    # elif [ "$SCENE" = "room" ]; then
+    #     CAP_MAX=1568227
+    # else
+    #     CAP_MAX=1000000
+    # fi
+    #     --cap_max $CAP_MAX \
 
     echo "Running $SCENE with max GSs $CAP_MAX"
 
     # train without eval
-    python simple_trainer_mcmc.py --eval_steps -1 --disable_viewer --data_factor $DATA_FACTOR \
+    python simple_trainer.py --eval_steps -1 --disable_viewer --data_factor $DATA_FACTOR \
         --data_dir data/360_v2/$SCENE/ \
-        --cap_max $CAP_MAX \
         --result_dir $RESULT_DIR/$SCENE/
 
     # run eval and render

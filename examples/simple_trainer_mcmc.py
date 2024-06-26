@@ -30,6 +30,7 @@ from utils import (
 
 from gsplat.rendering import rasterization
 from gsplat.relocation import compute_relocation_cuda
+from simple_trainer import create_splats_with_optimizers
 
 
 @dataclass
@@ -68,8 +69,8 @@ class Config:
     save_steps: List[int] = field(default_factory=lambda: [7_000, 30_000])
 
     # Initialization type
-    init_type: str = "random"
-    # Initialization number of GSs
+    init_type: str = "sfm"
+    # Initialization number of GSs if random
     init_num_pts: int = 100_000
     # Degree of spherical harmonics
     sh_degree: int = 3
@@ -77,6 +78,8 @@ class Config:
     sh_degree_interval: int = 1000
     # Initial opacity of GS
     init_opa: float = 0.5
+    # Initial scale of GS
+    init_scale: float = 0.1
     # Weight for SSIM loss
     ssim_lambda: float = 0.2
 
@@ -171,78 +174,6 @@ def _sample_alives(probs, num, alive_indices=None):
     return sampled_idxs, ratio
 
 
-def create_splats_with_optimizers(
-    parser: Parser,
-    init_type: str,
-    init_num_pts: int,
-    sh_degree: int = 3,
-    init_opacity: float = 0.1,
-    sparse_grad: bool = False,
-    batch_size: int = 1,
-    feature_dim: Optional[int] = None,
-    device: str = "cuda",
-) -> Tuple[torch.nn.ParameterDict, torch.optim.Optimizer]:
-    scene_scale = parser.scene_scale
-    scene_center = torch.from_numpy(parser.scene_center).float()
-
-    if init_type == "sfm":
-        points = torch.from_numpy(parser.points).float()
-        rgbs = torch.from_numpy(parser.points_rgb / 255.0).float()
-    elif init_type == "random":
-        points = (
-            torch.rand((init_num_pts, 3)) * 3 * 2 * scene_scale
-            - (3 * scene_scale)
-            + scene_center
-        )
-        rgbs = torch.rand((init_num_pts, 3))
-    else:
-        raise ValueError("Please specify a correct init_type: random or sfm")
-
-    N = points.shape[0]
-    # Initialize the GS size to be the average dist of the 3 nearest neighbors
-    dist2_avg = (knn(points, 4)[:, 1:] ** 2).mean(dim=-1)  # [N,]
-    dist_avg = torch.sqrt(dist2_avg)
-    scales = torch.log(dist_avg * 0.1).unsqueeze(-1).repeat(1, 3)  # [N, 3]
-    quats = torch.rand((N, 4))  # [N, 4]
-    opacities = torch.logit(torch.full((N,), init_opacity))  # [N,]
-
-    params = [
-        # name, value, lr
-        ("means3d", torch.nn.Parameter(points), 1.6e-4 * scene_scale),
-        ("scales", torch.nn.Parameter(scales), 5e-3),
-        ("quats", torch.nn.Parameter(quats), 1e-3),
-        ("opacities", torch.nn.Parameter(opacities), 5e-2),
-    ]
-
-    if feature_dim is None:
-        # color is SH coefficients.
-        colors = torch.zeros((N, (sh_degree + 1) ** 2, 3))  # [N, K, 3]
-        colors[:, 0, :] = rgb_to_sh(rgbs)
-        params.append(("sh0", torch.nn.Parameter(colors[:, :1, :]), 2.5e-3))
-        params.append(("shN", torch.nn.Parameter(colors[:, 1:, :]), 2.5e-3 / 20))
-    else:
-        # features will be used for appearance and view-dependent shading
-        features = torch.rand(N, feature_dim)  # [N, feature_dim]
-        params.append(("features", torch.nn.Parameter(features), 2.5e-3))
-        colors = torch.logit(rgbs)  # [N, 3]
-        params.append(("colors", torch.nn.Parameter(colors), 2.5e-3))
-
-    splats = torch.nn.ParameterDict({n: v for n, v, _ in params}).to(device)
-    # Scale learning rate based on batch size, reference:
-    # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
-    # Note that this would not make the training exactly equivalent, see
-    # https://arxiv.org/pdf/2402.18824v1
-    optimizers = [
-        (torch.optim.SparseAdam if sparse_grad else torch.optim.Adam)(
-            [{"params": splats[name], "lr": lr * math.sqrt(batch_size), "name": name}],
-            eps=1e-15 / math.sqrt(batch_size),
-            betas=(1 - batch_size * (1 - 0.9), 1 - batch_size * (1 - 0.999)),
-        )
-        for name, _, lr in params
-    ]
-    return splats, optimizers
-
-
 class Runner:
     """Engine for training and testing."""
 
@@ -289,8 +220,9 @@ class Runner:
             self.parser,
             init_type=cfg.init_type,
             init_num_pts=cfg.init_num_pts,
-            sh_degree=cfg.sh_degree,
             init_opacity=cfg.init_opa,
+            init_scale=cfg.init_scale,
+            sh_degree=cfg.sh_degree,
             sparse_grad=cfg.sparse_grad,
             batch_size=cfg.batch_size,
             feature_dim=feature_dim,
