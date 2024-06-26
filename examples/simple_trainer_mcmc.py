@@ -91,12 +91,6 @@ class Config:
     # Far plane clipping distance
     far_plane: float = 1e10
 
-    # Start refining GSs after this iteration
-    refine_start_iter: int = 500
-    # Stop refining GSs after this iteration
-    refine_stop_iter: int = 25_000
-    # Refine GSs every this steps
-    refine_every: int = 100
     # Maximum number of GSs.
     cap_max: int = 1_000_000
     # MCMC samping noise learning rate
@@ -105,6 +99,13 @@ class Config:
     opacity_reg = 0.01
     # Scale regularization
     scale_reg = 0.01
+
+    # Start refining GSs after this iteration
+    refine_start_iter: int = 500
+    # Stop refining GSs after this iteration
+    refine_stop_iter: int = 25_000
+    # Refine GSs every this steps
+    refine_every: int = 100
 
     # Use packed mode for rasterization, this leads to less memory usage but slightly slower.
     packed: bool = False
