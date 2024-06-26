@@ -71,10 +71,12 @@ class Config:
     # Steps to save the model
     save_steps: List[int] = field(default_factory=lambda: [7_000, 30_000])
 
-    # Initialization type
+    # Initialization strategy
     init_type: str = "sfm"
-    # Initialization number of GSs if random
+    # Initial number of GSs. Ignored if using sfm
     init_num_pts: int = 100_000
+    # Initial extent of GSs as a multiple of the camera extent. Ignored if using sfm
+    init_extent: float = 3.0
     # Degree of spherical harmonics
     sh_degree: int = 3
     # Turn on another SH degree every this steps
@@ -203,6 +205,7 @@ class Runner:
             self.parser,
             init_type=cfg.init_type,
             init_num_pts=cfg.init_num_pts,
+            init_extent=cfg.init_extent,
             init_opacity=cfg.init_opa,
             init_scale=cfg.init_scale,
             scene_scale=self.scene_scale,
