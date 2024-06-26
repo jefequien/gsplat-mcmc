@@ -1,7 +1,6 @@
 RESULT_DIR=results/mcmc_random_vary
 
-# for SCENE in bicycle bonsai counter garden kitchen room stump;
-for SCENE in bonsai counter kitchen room;
+for SCENE in bonsai counter garden kitchen room stump bicycle;
 do
     if [ "$SCENE" = "bicycle" ] || [ "$SCENE" = "stump" ] || [ "$SCENE" = "garden" ]; then
         DATA_FACTOR=4
@@ -9,7 +8,9 @@ do
         DATA_FACTOR=2
     fi
 
-    if [ "$SCENE" = "bonsai" ]; then
+    if [ "$SCENE" = "bicycle" ] || [ "$SCENE" = "stump" ] || [ "$SCENE" = "garden" ]; then
+        CAP_MAX=2000000
+    elif [ "$SCENE" = "bonsai" ]; then
         CAP_MAX=1213902
     elif [ "$SCENE" = "counter" ]; then
         CAP_MAX=1196698
