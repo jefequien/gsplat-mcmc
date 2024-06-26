@@ -15,6 +15,7 @@ def compute_relocation_cuda(opacity_old, scale_old, N):
     )
     return new_opacity, new_scale
 
+
 def sample_alives(probs, num, alive_indices=None):
     probs = probs / (probs.sum() + torch.finfo(torch.float32).eps)
     sampled_idxs = torch.multinomial(probs, num, replacement=True)
@@ -60,4 +61,3 @@ def build_scaling_rotation(s, r):
 
     L = R @ L
     return L
-

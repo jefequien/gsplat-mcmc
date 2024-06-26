@@ -28,7 +28,11 @@ from utils import (
 )
 
 from gsplat.rendering import rasterization
-from gsplat.relocation import compute_relocation_cuda, sample_alives, build_scaling_rotation
+from gsplat.relocation import (
+    compute_relocation_cuda,
+    sample_alives,
+    build_scaling_rotation,
+)
 from simple_trainer import create_splats_with_optimizers
 
 
@@ -150,7 +154,6 @@ class Config:
         self.refine_start_iter = int(self.refine_start_iter * factor)
         self.refine_stop_iter = int(self.refine_stop_iter * factor)
         self.refine_every = int(self.refine_every * factor)
-
 
 
 class Runner:
