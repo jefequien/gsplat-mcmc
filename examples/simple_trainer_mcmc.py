@@ -25,11 +25,10 @@ from utils import (
     knn,
     rgb_to_sh,
     set_random_seed,
-    build_scaling_rotation,
 )
 
 from gsplat.rendering import rasterization
-from gsplat.relocation import compute_relocation_cuda
+from gsplat.relocation import compute_relocation_cuda, sample_alives, build_scaling_rotation
 from simple_trainer import create_splats_with_optimizers
 
 
@@ -88,21 +87,10 @@ class Config:
     # Far plane clipping distance
     far_plane: float = 1e10
 
-    # GSs with opacity below this value will be pruned
-    prune_opa: float = 0.005
-    # GSs with image plane gradient above this value will be split/duplicated
-    grow_grad2d: float = 0.0002
-    # GSs with scale below this value will be duplicated. Above will be split
-    grow_scale3d: float = 0.01
-    # GSs with scale above this value will be pruned.
-    prune_scale3d: float = 0.1
-
     # Start refining GSs after this iteration
     refine_start_iter: int = 500
     # Stop refining GSs after this iteration
     refine_stop_iter: int = 25_000
-    # Reset opacities every this steps
-    reset_every: int = 3000
     # Refine GSs every this steps
     refine_every: int = 100
     # Maximum number of GSs.
@@ -161,17 +149,8 @@ class Config:
         self.sh_degree_interval = int(self.sh_degree_interval * factor)
         self.refine_start_iter = int(self.refine_start_iter * factor)
         self.refine_stop_iter = int(self.refine_stop_iter * factor)
-        self.reset_every = int(self.reset_every * factor)
         self.refine_every = int(self.refine_every * factor)
 
-
-def _sample_alives(probs, num, alive_indices=None):
-    probs = probs / (probs.sum() + torch.finfo(torch.float32).eps)
-    sampled_idxs = torch.multinomial(probs, num, replacement=True)
-    if alive_indices is not None:
-        sampled_idxs = alive_indices[sampled_idxs]
-    ratio = torch.bincount(sampled_idxs).unsqueeze(-1)
-    return sampled_idxs, ratio
 
 
 class Runner:
@@ -611,7 +590,7 @@ class Runner:
     @torch.no_grad()
     def relocate_gs(self, dead_indices: Tensor, alive_indices: Tensor):
         probs = torch.sigmoid(self.splats["opacities"])[alive_indices]
-        reinit_idx, ratio = _sample_alives(
+        reinit_idx, ratio = sample_alives(
             alive_indices=alive_indices, probs=probs, num=dead_indices.shape[0]
         )
         new_opacity, new_scaling = self._update_params(reinit_idx, ratio=ratio)
@@ -644,7 +623,7 @@ class Runner:
         if num_gs <= 0:
             return
         probs = torch.sigmoid(self.splats["opacities"])
-        add_idx, ratio = _sample_alives(probs=probs, num=num_gs)
+        add_idx, ratio = sample_alives(probs=probs, num=num_gs)
         new_opacity, new_scaling = self._update_params(add_idx, ratio=ratio)
 
         self.splats["opacities"][add_idx] = new_opacity
