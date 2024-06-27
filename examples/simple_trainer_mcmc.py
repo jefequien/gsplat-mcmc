@@ -570,18 +570,17 @@ class Runner:
                 self.viewer.update(step, num_train_rays_per_step)
 
     def _sample_new_gaussians(self, idxs: Tensor) -> tuple[Tensor, Tensor]:
-        ratio = torch.bincount(idxs)
-        new_opacity, new_scaling = compute_relocation(
-            opacity_old=torch.sigmoid(self.splats["opacities"])[idxs],
-            scale_old=torch.exp(self.splats["scales"])[idxs],
-            N=ratio[idxs] + 1,
+        new_opacities, new_scales = compute_relocation(
+            old_opacities=torch.sigmoid(self.splats["opacities"])[idxs],
+            old_scales=torch.exp(self.splats["scales"])[idxs],
+            N=torch.bincount(idxs)[idxs] + 1,
         )
-        new_opacity = torch.clamp(
-            new_opacity, max=1.0 - torch.finfo(torch.float32).eps, min=0.005
+        new_opacities = torch.clamp(
+            new_opacities, max=1.0 - torch.finfo(torch.float32).eps, min=0.005
         )
-        new_opacity = torch.logit(new_opacity)
-        new_scaling = torch.log(new_scaling.reshape(-1, 3))
-        return new_opacity, new_scaling
+        new_opacities = torch.logit(new_opacities)
+        new_scales = torch.log(new_scales.reshape(-1, 3))
+        return new_opacities, new_scales
 
     @torch.no_grad()
     def relocate_gs(self) -> int:
@@ -595,11 +594,11 @@ class Runner:
         probs = probs / (probs.sum() + torch.finfo(torch.float32).eps)
         sampled_idxs = torch.multinomial(probs, num_gs, replacement=True)
         sampled_idxs = alive_indices[sampled_idxs]
-        new_opacity, new_scaling = self._sample_new_gaussians(sampled_idxs)
+        new_opacities, new_scales = self._sample_new_gaussians(sampled_idxs)
 
         # Update splats
-        self.splats["opacities"][sampled_idxs] = new_opacity
-        self.splats["scales"][sampled_idxs] = new_scaling
+        self.splats["opacities"][sampled_idxs] = new_opacities
+        self.splats["scales"][sampled_idxs] = new_scales
         for k in self.splats.keys():
             self.splats[k][dead_indices] = self.splats[k][sampled_idxs]
 
@@ -632,11 +631,11 @@ class Runner:
         probs = torch.sigmoid(self.splats["opacities"])
         probs = probs / (probs.sum() + torch.finfo(torch.float32).eps)
         sampled_idxs = torch.multinomial(probs, num_gs, replacement=True)
-        new_opacity, new_scaling = self._sample_new_gaussians(sampled_idxs)
+        new_opacities, new_scales = self._sample_new_gaussians(sampled_idxs)
 
         # Update splats
-        self.splats["opacities"][sampled_idxs] = new_opacity
-        self.splats["scales"][sampled_idxs] = new_scaling
+        self.splats["opacities"][sampled_idxs] = new_opacities
+        self.splats["scales"][sampled_idxs] = new_scales
         for k in self.splats.keys():
             self.splats[k] = torch.cat([self.splats[k], self.splats[k][sampled_idxs]])
 

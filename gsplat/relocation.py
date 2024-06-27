@@ -11,12 +11,33 @@ for n in range(N_MAX):
 
 
 def compute_relocation(
-    opacity_old: Tensor, scale_old: Tensor, N: Tensor
+    old_opacities: Tensor,  # [N]
+    old_scales: Tensor,  # [N, 3]
+    N: Tensor,  # [N]
 ) -> tuple[Tensor, Tensor]:
-    new_opacity, new_scale = _make_lazy_cuda_func("compute_relocation")(
-        opacity_old, scale_old, N.int(), BINOMS, N_MAX
+    """Compute new Gaussians from a set of old Gaussians.
+
+    This function interprets the Gaussians as samples from a likelihood distribution.
+    It uses the old opacities, scales, and weights to compute the new opacities and scales.
+    This is an implementation of the paper
+    `3D Gaussian Splatting as Markov Chain Monte Carlo <https://arxiv.org/pdf/2404.09591>`_,
+
+    Args:
+        old_opacities: The opacities of the Gaussians. [N]
+        old_scales: The scales of the Gaussians. [N, 3]
+        N: Weights for each of the Gaussians. [N]
+
+    Returns:
+        A tuple:
+
+        **new_opacities**: The opacities of the new Gaussians. [N]
+
+        **new_scales**: The scales of the Gaussians. [N, 3]
+    """
+    new_opacities, new_scales = _make_lazy_cuda_func("compute_relocation")(
+        old_opacities, old_scales, N.int(), BINOMS, N_MAX
     )
-    return new_opacity, new_scale
+    return new_opacities, new_scales
 
 
 def build_rotation(r):
