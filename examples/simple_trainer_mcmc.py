@@ -480,7 +480,9 @@ class Runner:
                     print(f"Step {step}: Relocated {num_relocated_gs} GSs.")
 
                     num_new_gs = self.add_new_gs(cfg.cap_max)
-                    print(f"Step {step}: Added {num_new_gs} GSs. Now having {len(self.splats["means3d"])} GSs.")
+                    print(
+                        f"Step {step}: Added {num_new_gs} GSs. Now having {len(self.splats['means3d'])} GSs."
+                    )
 
             # Turn Gradients into Sparse Tensor before running optimizer
             if cfg.sparse_grad:
@@ -587,14 +589,14 @@ class Runner:
         dead_indices = dead_mask.nonzero(as_tuple=True)[0]
         alive_indices = (~dead_mask).nonzero(as_tuple=True)[0]
         num_gs = len(dead_indices)
-        
+
         # Sample for new GSs
         probs = torch.sigmoid(self.splats["opacities"])[alive_indices]
         probs = probs / (probs.sum() + torch.finfo(torch.float32).eps)
         sampled_idxs = torch.multinomial(probs, num_gs, replacement=True)
         sampled_idxs = alive_indices[sampled_idxs]
         new_opacity, new_scaling = self._sample_new_gaussians(sampled_idxs)
-        
+
         # Update splats
         self.splats["opacities"][sampled_idxs] = new_opacity
         self.splats["scales"][sampled_idxs] = new_scaling
@@ -625,7 +627,7 @@ class Runner:
         num_gs = max(0, target_num - current_num_points)
         if num_gs <= 0:
             return num_gs
-        
+
         # Sample for new GSs
         probs = torch.sigmoid(self.splats["opacities"])
         probs = probs / (probs.sum() + torch.finfo(torch.float32).eps)

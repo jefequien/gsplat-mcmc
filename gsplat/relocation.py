@@ -10,7 +10,9 @@ for n in range(N_MAX):
         BINOMS[n, k] = math.comb(n, k)
 
 
-def compute_relocation(opacity_old: Tensor, scale_old: Tensor, N: Tensor) -> tuple[Tensor, Tensor]:
+def compute_relocation(
+    opacity_old: Tensor, scale_old: Tensor, N: Tensor
+) -> tuple[Tensor, Tensor]:
     new_opacity, new_scale = _make_lazy_cuda_func("compute_relocation")(
         opacity_old, scale_old, N.int(), BINOMS, N_MAX
     )
