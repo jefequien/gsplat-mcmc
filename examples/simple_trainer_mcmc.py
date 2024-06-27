@@ -512,27 +512,9 @@ class Runner:
             for scheduler in schedulers:
                 scheduler.step()
 
-            # Add noise
-            with torch.no_grad():
-                L = build_scaling_rotation(
-                    torch.exp(self.splats["scales"]), self.splats["quats"]
-                )
-                actual_covariance = L @ L.transpose(1, 2)
-
-                def op_sigmoid(x, k=100, x0=0.995):
-                    return 1 / (1 + torch.exp(-k * (x - x0)))
-
-                xyz_lr = schedulers[0].get_last_lr()[0]
-                noise = (
-                    torch.randn_like(self.splats["means3d"])
-                    * (
-                        op_sigmoid(1 - torch.sigmoid(self.splats["opacities"]))
-                    ).unsqueeze(-1)
-                    * cfg.noise_lr
-                    * xyz_lr
-                )
-                noise = torch.bmm(actual_covariance, noise.unsqueeze(-1)).squeeze(-1)
-                self.splats["means3d"].add_(noise)
+            # add noise to GSs
+            last_lr = schedulers[0].get_last_lr()[0]
+            self.add_noise_to_gs(last_lr)
 
             # save checkpoint
             if step in [i - 1 for i in cfg.save_steps] or step == max_steps - 1:
@@ -659,6 +641,25 @@ class Runner:
                 self.splats[name] = p_new
         torch.cuda.empty_cache()
         return num_gs
+
+    @torch.no_grad()
+    def add_noise_to_gs(self, last_lr):
+        L = build_scaling_rotation(
+            torch.exp(self.splats["scales"]), self.splats["quats"]
+        )
+        actual_covariance = L @ L.transpose(1, 2)
+
+        def op_sigmoid(x, k=100, x0=0.995):
+            return 1 / (1 + torch.exp(-k * (x - x0)))
+
+        noise = (
+            torch.randn_like(self.splats["means3d"])
+            * (op_sigmoid(1 - torch.sigmoid(self.splats["opacities"]))).unsqueeze(-1)
+            * cfg.noise_lr
+            * last_lr
+        )
+        noise = torch.bmm(actual_covariance, noise.unsqueeze(-1)).squeeze(-1)
+        self.splats["means3d"].add_(noise)
 
     @torch.no_grad()
     def eval(self, step: int):
