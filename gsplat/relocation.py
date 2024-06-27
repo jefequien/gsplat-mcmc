@@ -13,7 +13,7 @@ BINOMS = BINOMS.contiguous()
 def compute_relocation(
     old_opacities: Tensor,  # [N]
     old_scales: Tensor,  # [N, 3]
-    Ns: Tensor,  # [N]
+    ratios: Tensor,  # [N]
 ) -> tuple[Tensor, Tensor]:
     """Compute new Gaussians from a set of old Gaussians.
 
@@ -25,7 +25,7 @@ def compute_relocation(
     Args:
         old_opacities: The opacities of the Gaussians. [N]
         old_scales: The scales of the Gaussians. [N, 3]
-        Ns: The relative weights for each of the Gaussians. [N]
+        ratios: The relative frequencies for each of the Gaussians. [N]
 
     Returns:
         A tuple:
@@ -36,13 +36,13 @@ def compute_relocation(
     """
     N = old_opacities.shape[0]
     assert old_scales.shape == (N, 3), old_scales.shape
-    assert Ns.shape == (N, ), Ns.shape
+    assert ratios.shape == (N, ), ratios.shape
     old_opacities = old_opacities.contiguous()
     old_scales = old_scales.contiguous()
-    Ns = Ns.contiguous()
+    ratios = ratios.contiguous()
     
     new_opacities, new_scales = _make_lazy_cuda_func("compute_relocation")(
-        old_opacities, old_scales, Ns, BINOMS, N_MAX
+        old_opacities, old_scales, ratios, BINOMS, N_MAX
     )
     return new_opacities, new_scales
 

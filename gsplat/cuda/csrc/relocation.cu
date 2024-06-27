@@ -3,51 +3,51 @@
 // Equation (9) in "3D Gaussian Splatting as Markov Chain Monte Carlo"
 __global__ void compute_relocation_kernel(
     int P,
-    float *opacity_old,
-    float *scale_old,
-    int *N,
+    float *old_opacities,
+    float *old_scales,
+    int *ratios,
     float *binoms,
     int n_max,
-    float *opacity_new,
-    float *scale_new
+    float *new_opacities,
+    float *new_scales
 ) {
     int idx = threadIdx.x + blockIdx.x * blockDim.x;
     if (idx >= P)
         return;
 
-    int N_idx = N[idx];
+    int n_idx = ratios[idx];
     float denom_sum = 0.0f;
 
     // compute new opacity
-    opacity_new[idx] = 1.0f - powf(1.0f - opacity_old[idx], 1.0f / N_idx);
+    new_opacities[idx] = 1.0f - powf(1.0f - old_opacities[idx], 1.0f / n_idx);
 
     // compute new scale
-    for (int i = 1; i <= N_idx; ++i) {
+    for (int i = 1; i <= n_idx; ++i) {
         for (int k = 0; k <= (i - 1); ++k) {
             float bin_coeff = binoms[(i - 1) * n_max + k];
             float term =
-                (pow(-1, k) / sqrt(k + 1)) * pow(opacity_new[idx], k + 1);
+                (pow(-1, k) / sqrt(k + 1)) * pow(new_opacities[idx], k + 1);
             denom_sum += (bin_coeff * term);
         }
     }
-    float coeff = (opacity_old[idx] / denom_sum);
+    float coeff = (old_opacities[idx] / denom_sum);
     for (int i = 0; i < 3; ++i)
-        scale_new[idx * 3 + i] = coeff * scale_old[idx * 3 + i];
+        new_scales[idx * 3 + i] = coeff * old_scales[idx * 3 + i];
 }
 
 std::tuple<torch::Tensor, torch::Tensor> compute_relocation_tensor(
-    torch::Tensor &opacity_old,
-    torch::Tensor &scale_old,
-    torch::Tensor &N,
+    torch::Tensor &old_opacities,
+    torch::Tensor &old_scales,
+    torch::Tensor &ratios,
     torch::Tensor &binoms,
     const int n_max
 ) {
-    const int P = opacity_old.size(0);
+    const int P = old_opacities.size(0);
 
-    torch::Tensor final_opacity =
-        torch::full({P}, 0, opacity_old.options().dtype(torch::kFloat32));
-    torch::Tensor final_scale =
-        torch::full({3 * P}, 0, scale_old.options().dtype(torch::kFloat32));
+    torch::Tensor final_opacities =
+        torch::full({P}, 0, old_opacities.options().dtype(torch::kFloat32));
+    torch::Tensor final_scales =
+        torch::full({3 * P}, 0, old_scales.options().dtype(torch::kFloat32));
 
     if (P != 0) {
         int num_blocks = (P + 255) / 256;
@@ -55,14 +55,14 @@ std::tuple<torch::Tensor, torch::Tensor> compute_relocation_tensor(
         dim3 grid(num_blocks, 1, 1);
         compute_relocation_kernel<<<grid, block>>>(
             P,
-            opacity_old.data<float>(),
-            scale_old.data<float>(),
-            N.data<int>(),
+            old_opacities.data<float>(),
+            old_scales.data<float>(),
+            ratios.data<int>(),
             binoms.data<float>(),
             n_max,
-            final_opacity.data<float>(),
-            final_scale.data<float>()
+            final_opacities.data<float>(),
+            final_scales.data<float>()
         );
     }
-    return std::make_tuple(final_opacity, final_scale);
+    return std::make_tuple(final_opacities, final_scales);
 }
