@@ -10,20 +10,11 @@ for n in range(N_MAX):
         BINOMS[n, k] = math.comb(n, k)
 
 
-def compute_relocation_cuda(opacity_old: Tensor, scale_old: Tensor, N: Tensor) -> tuple[Tensor, Tensor]:
+def compute_relocation(opacity_old: Tensor, scale_old: Tensor, N: Tensor) -> tuple[Tensor, Tensor]:
     new_opacity, new_scale = _make_lazy_cuda_func("compute_relocation")(
         opacity_old, scale_old, N.int(), BINOMS, N_MAX
     )
     return new_opacity, new_scale
-
-
-def sample_alives(probs, num, alive_indices=None):
-    probs = probs / (probs.sum() + torch.finfo(torch.float32).eps)
-    sampled_idxs = torch.multinomial(probs, num, replacement=True)
-    if alive_indices is not None:
-        sampled_idxs = alive_indices[sampled_idxs]
-    ratio = torch.bincount(sampled_idxs).unsqueeze(-1)
-    return sampled_idxs, ratio
 
 
 def build_rotation(r):
