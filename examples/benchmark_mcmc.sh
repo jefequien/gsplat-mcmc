@@ -8,18 +8,16 @@ do
         DATA_FACTOR=2
     fi
 
-    if [ "$SCENE" = "bicycle" ] || [ "$SCENE" = "stump" ] || [ "$SCENE" = "garden" ]; then
-        CAP_MAX=3000000
-    elif [ "$SCENE" = "bonsai" ]; then
-        CAP_MAX=1218809
+    if [ "$SCENE" = "bonsai" ]; then
+        CAP_MAX=1300000
     elif [ "$SCENE" = "counter" ]; then
-        CAP_MAX=1186522
+        CAP_MAX=1200000
     elif [ "$SCENE" = "kitchen" ]; then
-        CAP_MAX=1792551
+        CAP_MAX=1800000
     elif [ "$SCENE" = "room" ]; then
-        CAP_MAX=1581834
+        CAP_MAX=1500000
     else
-        CAP_MAX=1000000
+        CAP_MAX=2000000
     fi
 
     echo "Running $SCENE"
