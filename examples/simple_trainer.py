@@ -27,6 +27,7 @@ from utils import (
     rgb_to_sh,
     set_random_seed,
 )
+from point_utils import normal_from_depth_image
 
 from gsplat.rendering import rasterization
 
@@ -62,9 +63,9 @@ class Config:
     # Number of training steps
     max_steps: int = 30_000
     # Steps to evaluate the model
-    eval_steps: List[int] = field(default_factory=lambda: [7_000, 30_000])
+    eval_steps: List[int] = field(default_factory=lambda: [1_000, 7_000, 30_000])
     # Steps to save the model
-    save_steps: List[int] = field(default_factory=lambda: [7_000, 30_000])
+    save_steps: List[int] = field(default_factory=lambda: [1_000, 7_000, 30_000])
 
     # Initialization strategy
     init_type: str = "sfm"
@@ -184,7 +185,9 @@ def create_splats_with_optimizers(
     # Initialize the GS size to be the average dist of the 3 nearest neighbors
     dist2_avg = (knn(points, 4)[:, 1:] ** 2).mean(dim=-1)  # [N,]
     dist_avg = torch.sqrt(dist2_avg)
-    scales = torch.log(dist_avg * init_scale).unsqueeze(-1).repeat(1, 3)  # [N, 3]
+    scales = (dist_avg * init_scale).unsqueeze(-1).repeat(1, 3)  # [N, 3]
+    scales[:, 2] /= 100
+    scales = torch.log(scales)
     quats = torch.rand((N, 4))  # [N, 4]
     opacities = torch.logit(torch.full((N,), init_opacity))  # [N,]
 
@@ -834,7 +837,7 @@ class Runner:
 
             torch.cuda.synchronize()
             tic = time.time()
-            colors, _, _ = self.rasterize_splats(
+            renders, _, _ = self.rasterize_splats(
                 camtoworlds=camtoworlds,
                 Ks=Ks,
                 width=width,
@@ -842,15 +845,22 @@ class Runner:
                 sh_degree=cfg.sh_degree,
                 near_plane=cfg.near_plane,
                 far_plane=cfg.far_plane,
-            )  # [1, H, W, 3]
-            colors = torch.clamp(colors, 0.0, 1.0)
+                render_mode="RGB+ED",
+            )  # [1, H, W, 4]
+            colors = torch.clamp(renders[..., 0:3], 0.0, 1.0)  # [1, H, W, 3]
+            depths = renders[..., 3:4]  # [1, H, W, 1]
+            depths = (depths - depths.min()) / (depths.max() - depths.min())
+            
+            depths_normal = -1 * normal_from_depth_image(depths[0,:,:,0], Ks[0], camtoworlds[0])
+            depths_normal_vis = 0.5 * (depths_normal.unsqueeze(0) + 1)
+
             torch.cuda.synchronize()
             ellipse_time += time.time() - tic
 
             # write images
-            canvas = torch.cat([pixels, colors], dim=2).squeeze(0).cpu().numpy()
+            canvas = torch.cat([pixels, colors, depths.repeat(1, 1, 1, 3), depths_normal_vis], dim=2).squeeze(0).cpu().numpy()
             imageio.imwrite(
-                f"{self.render_dir}/val_{i:04d}.png", (canvas * 255).astype(np.uint8)
+                f"{self.render_dir}/val_step{step:04d}_{i:04d}.png", (canvas * 255).astype(np.uint8)
             )
 
             pixels = pixels.permute(0, 3, 1, 2)  # [1, 3, H, W]

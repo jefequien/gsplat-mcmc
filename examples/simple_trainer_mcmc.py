@@ -27,8 +27,8 @@ from utils import (
 from gsplat import quat_scale_to_covar_preci
 from gsplat.rendering import rasterization
 from gsplat.relocation import compute_relocation
-from gsplat.cuda_legacy._torch_impl import scale_rot_to_cov3d
 from simple_trainer import create_splats_with_optimizers
+from point_utils import normal_from_depth_image
 
 
 @dataclass
@@ -62,9 +62,9 @@ class Config:
     # Number of training steps
     max_steps: int = 30_000
     # Steps to evaluate the model
-    eval_steps: List[int] = field(default_factory=lambda: [7_000, 30_000])
+    eval_steps: List[int] = field(default_factory=lambda: [1_000, 7_000, 30_000])
     # Steps to save the model
-    save_steps: List[int] = field(default_factory=lambda: [7_000, 30_000])
+    save_steps: List[int] = field(default_factory=lambda: [1_000, 7_000, 30_000])
 
     # Initialization strategy
     init_type: str = "sfm"
@@ -394,12 +394,15 @@ class Runner:
                 near_plane=cfg.near_plane,
                 far_plane=cfg.far_plane,
                 image_ids=image_ids,
-                render_mode="RGB+ED" if cfg.depth_loss else "RGB",
+                render_mode="RGB+ED",# if cfg.depth_loss else "RGB",
             )
-            if renders.shape[-1] == 4:
-                colors, depths = renders[..., 0:3], renders[..., 3:4]
-            else:
-                colors, depths = renders, None
+            colors, normals, depths = renders[..., 0:3], renders[..., 3:6], renders[..., 6:7]
+            normals = F.normalize(normals, dim=-1)
+            normals_from_depth = normal_from_depth_image(depths[0,:,:,0], Ks[0], camtoworlds[0])
+            # if renders.shape[-1] == 4:
+            #     colors, depths = renders[..., 0:3], renders[..., 3:4]
+            # else:
+            #     colors, depths = renders, None
 
             if cfg.random_bkgd:
                 bkgd = torch.rand(1, 3, device=device)
@@ -412,7 +415,9 @@ class Runner:
             ssimloss = 1.0 - self.ssim(
                 pixels.permute(0, 3, 1, 2), colors.permute(0, 3, 1, 2)
             )
-            loss = l1loss * (1.0 - cfg.ssim_lambda) + ssimloss * cfg.ssim_lambda
+            normalloss = (1 - (normals * normals_from_depth).sum(dim=0))[None].mean()
+            print(normalloss)
+            loss = l1loss * (1.0 - cfg.ssim_lambda) + ssimloss * cfg.ssim_lambda + normalloss * cfg.ssim_lambda
             if cfg.depth_loss:
                 # query depths from depth map
                 points = torch.stack(
@@ -459,6 +464,7 @@ class Runner:
                 self.writer.add_scalar("train/loss", loss.item(), step)
                 self.writer.add_scalar("train/l1loss", l1loss.item(), step)
                 self.writer.add_scalar("train/ssimloss", ssimloss.item(), step)
+                self.writer.add_scalar("train/normalloss", normalloss.item(), step)
                 self.writer.add_scalar(
                     "train/num_GS", len(self.splats["means3d"]), step
                 )
@@ -481,6 +487,7 @@ class Runner:
                     print(
                         f"Step {step}: Added {num_new_gs} GSs. Now having {len(self.splats['means3d'])} GSs."
                     )
+                    print(torch.abs(torch.exp(self.splats["scales"])).mean(axis=0))
 
             # Turn Gradients into Sparse Tensor before running optimizer
             if cfg.sparse_grad:
@@ -681,7 +688,7 @@ class Runner:
 
             torch.cuda.synchronize()
             tic = time.time()
-            colors, _, _ = self.rasterize_splats(
+            renders, _, _ = self.rasterize_splats(
                 camtoworlds=camtoworlds,
                 Ks=Ks,
                 width=width,
@@ -689,15 +696,27 @@ class Runner:
                 sh_degree=cfg.sh_degree,
                 near_plane=cfg.near_plane,
                 far_plane=cfg.far_plane,
-            )  # [1, H, W, 3]
-            colors = torch.clamp(colors, 0.0, 1.0)
+                render_mode="RGB+ED",
+            )  # [1, H, W, 4]
+            print(renders.shape)
+            colors = torch.clamp(renders[..., 0:3], 0.0, 1.0)  # [1, H, W, 3]
+            normals = renders[..., 3:6]  # [1, H, W, 3]
+            depths = renders[..., 6:7]  # [1, H, W, 1]
+            # normals = normals @ (viewpoint_camera.world_view_transform[:3,:3].T)
+            # normals = normals[0] @ camtoworlds[0][:3,:3]
+            normals = F.normalize(normals, dim=-1)
+            normals = 0.5 * (normals + 1)
+            depths = (depths - depths.min()) / (depths.max() - depths.min())
+            
+            depths_normal = normal_from_depth_image(depths[0,:,:,0], Ks[0], camtoworlds[0])
+            depths_normal_vis = 0.5 * (depths_normal.unsqueeze(0) + 1)
             torch.cuda.synchronize()
             ellipse_time += time.time() - tic
 
             # write images
-            canvas = torch.cat([pixels, colors], dim=2).squeeze(0).cpu().numpy()
+            canvas = torch.cat([pixels, colors, normals, depths_normal_vis], dim=2).squeeze(0).cpu().numpy()
             imageio.imwrite(
-                f"{self.render_dir}/val_{i:04d}.png", (canvas * 255).astype(np.uint8)
+                f"{self.render_dir}/val_step{step:04d}_{i:04d}.png", (canvas * 255).astype(np.uint8)
             )
 
             pixels = pixels.permute(0, 3, 1, 2)  # [1, 3, H, W]
@@ -764,14 +783,14 @@ class Runner:
                 far_plane=cfg.far_plane,
                 render_mode="RGB+ED",
             )  # [1, H, W, 4]
-            colors = torch.clamp(renders[0, ..., 0:3], 0.0, 1.0)  # [H, W, 3]
-            depths = renders[0, ..., 3:4]  # [H, W, 1]
+            colors = torch.clamp(renders[..., 0:3], 0.0, 1.0)  # [H, W, 3]
+            normals = renders[..., 3:6]  # [1, H, W, 3]
+            depths = renders[..., 6:7]  # [1, H, W, 1]
+            normals = 0.5 * (F.normalize(normals, dim=-1) + 1)
             depths = (depths - depths.min()) / (depths.max() - depths.min())
 
             # write images
-            canvas = torch.cat(
-                [colors, depths.repeat(1, 1, 3)], dim=0 if width > height else 1
-            )
+            canvas = torch.cat([colors, depths.repeat(1, 1, 1, 3), normals], dim=2).squeeze(0)
             canvas = (canvas.cpu().numpy() * 255).astype(np.uint8)
             canvas_all.append(canvas)
 

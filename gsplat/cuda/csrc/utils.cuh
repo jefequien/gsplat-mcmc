@@ -332,4 +332,14 @@ inline __device__ void add_blur_vjp(const float eps2d, const glm::mat2 conic_blu
         v_sqr_comp * (one_minus_sqr_comp * conic_blur[1][1] - eps2d * det_conic_blur);
 }
 
+__forceinline__ __device__ float3 transformVec4x3(const float3& p, const float* matrix)
+{
+	float3 transformed = {
+		matrix[0] * p.x + matrix[4] * p.y + matrix[8] * p.z,
+		matrix[1] * p.x + matrix[5] * p.y + matrix[9] * p.z,
+		matrix[2] * p.x + matrix[6] * p.y + matrix[10] * p.z,
+	};
+	return transformed;
+}
+
 #endif // GSPLAT_CUDA_UTILS_H
