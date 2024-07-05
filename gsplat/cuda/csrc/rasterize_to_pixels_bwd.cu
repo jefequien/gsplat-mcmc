@@ -25,12 +25,14 @@ __global__ void rasterize_to_pixels_bwd_kernel(
     const int32_t *__restrict__ tile_offsets, // [C, tile_height, tile_width]
     const int32_t *__restrict__ flatten_ids,  // [n_isects]
     // fwd outputs
+    const S *__restrict__ render_colors, // [C, image_height, image_width, COLOR_DIM]
     const S *__restrict__ render_alphas, // [C, image_height, image_width, 1]
     const int32_t *__restrict__ last_ids,    // [C, image_height, image_width]
     // grad outputs
     const S
         *__restrict__ v_render_colors, // [C, image_height, image_width, COLOR_DIM]
     const S *__restrict__ v_render_alphas, // [C, image_height, image_width, 1]
+    const S *__restrict__ v_render_distortions, // [C, image_height, image_width, 1]
     // grad inputs
     typename Float2<S>::type *__restrict__ v_means2d_abs, // [C, N, 2] or [nnz, 2]
     typename Float2<S>::type *__restrict__ v_means2d,     // [C, N, 2] or [nnz, 2]
@@ -45,10 +47,12 @@ __global__ void rasterize_to_pixels_bwd_kernel(
     uint32_t j = block.group_index().z * tile_size + block.thread_index().x;
 
     tile_offsets += camera_id * tile_height * tile_width;
+    render_colors += camera_id * image_height * image_width * COLOR_DIM;
     render_alphas += camera_id * image_height * image_width;
     last_ids += camera_id * image_height * image_width;
     v_render_colors += camera_id * image_height * image_width * COLOR_DIM;
     v_render_alphas += camera_id * image_height * image_width;
+    v_render_distortions += camera_id * image_height * image_width;
     if (backgrounds != nullptr) {
         backgrounds += camera_id * COLOR_DIM;
     }
@@ -94,6 +98,18 @@ __global__ void rasterize_to_pixels_bwd_kernel(
         v_render_c[k] = v_render_colors[pix_id * COLOR_DIM + k];
     }
     const S v_render_a = v_render_alphas[pix_id];
+
+    // prepare for distortion
+    float v_distort = 0.f;
+    float accum_d, accum_w;
+    float accum_d_buffer, accum_w_buffer, distort_buffer;
+    v_distort = v_render_distortions[pix_id];
+    // last channel of render_colors is accumulated depth
+    accum_d_buffer = render_colors[pix_id * COLOR_DIM + COLOR_DIM - 1];
+    accum_d = accum_d_buffer;
+    accum_w_buffer = render_alphas[pix_id];
+    accum_w = accum_w_buffer;
+    distort_buffer = 0.f;
 
     // collect and process batches of gaussians
     // each thread loads one gaussian at a time before rasterizing
@@ -191,6 +207,21 @@ __global__ void rasterize_to_pixels_bwd_kernel(
                     }
                     v_alpha += -T_final * ra * accum;
                 }
+                
+                // contribution from distortion
+                // last channel of colors is depth
+                float depth = rgbs_batch[t * COLOR_DIM + COLOR_DIM - 1];
+                float dl_dw =
+                    2.0f * (2.0f * (depth * accum_w_buffer - accum_d_buffer) +
+                            (accum_d - depth * accum_w));
+                // df / d(alpha)
+                v_alpha += (dl_dw * T - distort_buffer * ra) * v_distort;
+                accum_d_buffer -= fac * depth;
+                accum_w_buffer -= fac;
+                distort_buffer += dl_dw * fac;
+                // df / d(depth). put it in the last channel of v_rgb
+                v_rgb_local[COLOR_DIM - 1] +=
+                    2.0f * fac * (2.0f - 2.0f * T - accum_w + fac) * v_distort;
 
                 if (opac * vis <= 0.999f) {
                     const S v_sigma = -opac * vis * v_alpha;
@@ -263,11 +294,13 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     const torch::Tensor &tile_offsets, // [C, tile_height, tile_width]
     const torch::Tensor &flatten_ids,  // [n_isects]
     // forward outputs
+    const torch::Tensor &render_colors, // [C, image_height, image_width, COLOR_DIM]
     const torch::Tensor &render_alphas, // [C, image_height, image_width, 1]
     const torch::Tensor &last_ids,      // [C, image_height, image_width]
     // gradients of outputs
     const torch::Tensor &v_render_colors, // [C, image_height, image_width, 3]
     const torch::Tensor &v_render_alphas, // [C, image_height, image_width, 1]
+    const torch::Tensor &v_render_distortions, // [C, image_height, image_width, 1]
     // options
     bool absgrad) {
 
@@ -279,10 +312,12 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     CHECK_INPUT(opacities);
     CHECK_INPUT(tile_offsets);
     CHECK_INPUT(flatten_ids);
+    CHECK_INPUT(render_colors);
     CHECK_INPUT(render_alphas);
     CHECK_INPUT(last_ids);
     CHECK_INPUT(v_render_colors);
     CHECK_INPUT(v_render_alphas);
+    CHECK_INPUT(v_render_distortions);
     if (backgrounds.has_value()) {
         CHECK_INPUT(backgrounds.value());
     }
@@ -330,8 +365,8 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
                                     : nullptr,
             image_width, image_height, tile_size, tile_width, tile_height,
             tile_offsets.data_ptr<int32_t>(), flatten_ids.data_ptr<int32_t>(),
-            render_alphas.data_ptr<float>(), last_ids.data_ptr<int32_t>(),
-            v_render_colors.data_ptr<float>(), v_render_alphas.data_ptr<float>(),
+            render_colors.data_ptr<float>(), render_alphas.data_ptr<float>(), last_ids.data_ptr<int32_t>(),
+            v_render_colors.data_ptr<float>(), v_render_alphas.data_ptr<float>(), v_render_distortions.data_ptr<float>(),
             absgrad ? (float2 *)v_means2d_abs.data_ptr<float>() : nullptr,
             (float2 *)v_means2d.data_ptr<float>(),
             (float3 *)v_conics.data_ptr<float>(), v_colors.data_ptr<float>(),
@@ -356,11 +391,13 @@ rasterize_to_pixels_bwd_tensor(
     const torch::Tensor &tile_offsets, // [C, tile_height, tile_width]
     const torch::Tensor &flatten_ids,  // [n_isects]
     // forward outputs
+    const torch::Tensor &render_colors, // [C, image_height, image_width, COLOR_DIM]
     const torch::Tensor &render_alphas, // [C, image_height, image_width, 1]
     const torch::Tensor &last_ids,      // [C, image_height, image_width]
     // gradients of outputs
     const torch::Tensor &v_render_colors, // [C, image_height, image_width, 3]
     const torch::Tensor &v_render_alphas, // [C, image_height, image_width, 1]
+    const torch::Tensor &v_render_distortions, // [C, image_height, image_width, 1]
     // options
     bool absgrad) {
 
@@ -372,8 +409,8 @@ rasterize_to_pixels_bwd_tensor(
         means2d, conics, colors, opacities, \
         backgrounds, image_width, image_height, \
         tile_size, tile_offsets, flatten_ids, \
-        render_alphas, last_ids, v_render_colors, \
-        v_render_alphas, absgrad);
+        render_colors, render_alphas, last_ids, v_render_colors, \
+        v_render_alphas, v_render_distortions, absgrad);
 
     switch (COLOR_DIM) {
         __GS__CALL_(1)

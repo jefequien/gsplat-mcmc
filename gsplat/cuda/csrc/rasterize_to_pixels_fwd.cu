@@ -25,6 +25,7 @@ __global__ void rasterize_to_pixels_fwd_kernel(
     const int32_t *__restrict__ flatten_ids,  // [n_isects]
     S *__restrict__ render_colors, // [C, image_height, image_width, COLOR_DIM]
     S *__restrict__ render_alphas, // [C, image_height, image_width, 1]
+    S *__restrict__ render_distortions, // [C, image_height, image_width, 1]
     int32_t *__restrict__ last_ids     // [C, image_height, image_width]
 ) {
     // each thread draws one pixel, but also timeshares caching gaussians in a
@@ -39,6 +40,7 @@ __global__ void rasterize_to_pixels_fwd_kernel(
     tile_offsets += camera_id * tile_height * tile_width;
     render_colors += camera_id * image_height * image_width * COLOR_DIM;
     render_alphas += camera_id * image_height * image_width;
+    render_distortions += camera_id * image_height * image_width;
     last_ids += camera_id * image_height * image_width;
     if (backgrounds != nullptr) {
         backgrounds += camera_id * COLOR_DIM;
@@ -81,6 +83,12 @@ __global__ void rasterize_to_pixels_fwd_kernel(
     // each thread loads one gaussian at a time before rasterizing its
     // designated pixel
     uint32_t tr = block.thread_rank();
+    
+    // Per-pixel distortion error proposed in Mip-NeRF 360.
+    // Implemented reference:
+    // https://github.com/nerfstudio-project/nerfacc/blob/master/nerfacc/losses.py#L7
+    float distort = 0.f;
+    float accum_vis_depth = 0.f; // accumulated vis * depth
 
     S pix_out[COLOR_DIM] = {0.f};
     for (uint32_t b = 0; b < num_batches; ++b) {
@@ -134,6 +142,16 @@ __global__ void rasterize_to_pixels_fwd_kernel(
             for (uint32_t k = 0; k < COLOR_DIM; ++k) {
                 pix_out[k] += c_ptr[k] * vis;
             }
+
+            // the last channel of colors is depth
+            const float depth = c_ptr[COLOR_DIM - 1];
+            // in nerfacc, loss_bi_0 = weights * t_mids * exclusive_sum(weights)
+            const float distort_bi_0 = vis * depth * (1.0f - T);
+            // in nerfacc, loss_bi_1 = weights * exclusive_sum(weights * t_mids)
+            const float distort_bi_1 = vis * accum_vis_depth;
+            distort += 2.0f * (distort_bi_0 - distort_bi_1);
+            accum_vis_depth += vis * depth;
+
             cur_idx = batch_start + t;
 
             T = next_T;
@@ -154,11 +172,12 @@ __global__ void rasterize_to_pixels_fwd_kernel(
         }
         // index in bin of last gaussian in this pixel
         last_ids[pix_id] = static_cast<int32_t>(cur_idx);
+        render_distortions[pix_id] = distort;
     }
 }
 
 template <uint32_t CDIM>
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> call_kernel_with_dim(
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> call_kernel_with_dim(
     // Gaussian parameters
     const torch::Tensor &means2d,   // [C, N, 2] or [nnz, 2]
     const torch::Tensor &conics,    // [C, N, 3] or [nnz, 3]
@@ -199,6 +218,8 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> call_kernel_with_dim(
                                          means2d.options().dtype(torch::kFloat32));
     torch::Tensor alphas = torch::empty({C, image_height, image_width, 1},
                                         means2d.options().dtype(torch::kFloat32));
+    torch::Tensor distortions = torch::empty({C, image_height, image_width, 1},
+                                        means2d.options().dtype(torch::kFloat32));
     torch::Tensor last_ids = torch::empty({C, image_height, image_width},
                                           means2d.options().dtype(torch::kInt32));
 
@@ -222,16 +243,17 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> call_kernel_with_dim(
         backgrounds.has_value() ? backgrounds.value().data_ptr<float>() : nullptr,
         image_width, image_height, tile_size, tile_width, tile_height,
         tile_offsets.data_ptr<int32_t>(), flatten_ids.data_ptr<int32_t>(),
-        renders.data_ptr<float>(), alphas.data_ptr<float>(),
+        renders.data_ptr<float>(), alphas.data_ptr<float>(), distortions.data_ptr<float>(),
         last_ids.data_ptr<int32_t>());
  
-    return std::make_tuple(renders, alphas, last_ids);
+    return std::make_tuple(renders, alphas, distortions, last_ids);
 }
 
 
 
 
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> rasterize_to_pixels_fwd_tensor(
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+rasterize_to_pixels_fwd_tensor(
     // Gaussian parameters
     const torch::Tensor &means2d,   // [C, N, 2] or [nnz, 2]
     const torch::Tensor &conics,    // [C, N, 3] or [nnz, 3]

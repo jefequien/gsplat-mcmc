@@ -58,6 +58,7 @@ do
         --cap_max $CAP_MAX \
         --data_dir data/360_v2/$SCENE/ \
         --normal_consistency_loss \
-        --result_dir results/3dgs_with_normal/$SCENE/
+        --dist_loss \
+        --result_dir results/3dgs_with_normal_dist_loss/$SCENE/
 
 done
