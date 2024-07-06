@@ -284,6 +284,7 @@ rasterize_to_pixels_fwd_tensor(
         __GS__CALL_(3)
         __GS__CALL_(4)
         __GS__CALL_(5)
+        __GS__CALL_(7)
         __GS__CALL_(8)
         __GS__CALL_(9)
         __GS__CALL_(16)

@@ -148,7 +148,7 @@ rasterize_to_pixels_bwd_tensor(
     // gradients of outputs
     const torch::Tensor &v_render_colors, // [C, image_height, image_width, 3]
     const torch::Tensor &v_render_alphas, // [C, image_height, image_width, 1]
-    const torch::Tensor &v_render_distloss, // [C, image_height, image_width, 1]
+    const torch::Tensor &v_render_distortions, // [C, image_height, image_width, 1]
     // options
     bool absgrad);
 

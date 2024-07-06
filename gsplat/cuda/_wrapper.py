@@ -434,6 +434,7 @@ def rasterize_to_pixels(
         3,
         4,
         5,
+        7,
         8,
         9,
         16,
@@ -858,7 +859,6 @@ class _RasterizeToPixels(torch.autograd.Function):
 
         # double to float
         render_alphas = render_alphas.float()
-        print(render_distloss.shape, render_distloss.mean())
         return render_colors, render_alphas, render_distloss
 
     @staticmethod
