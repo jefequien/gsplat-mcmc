@@ -1,5 +1,5 @@
 # for SCENE in bicycle bonsai counter garden kitchen room stump treehill flowers;
-for SCENE in garden treehill;
+for SCENE in garden treehill bicycle bonsai kitchen;
 do
     if [ "$SCENE" = "bicycle" ] || [ "$SCENE" = "stump" ] || [ "$SCENE" = "garden" ] || [ "$SCENE" = "treehill" ] || [ "$SCENE" = "flowers" ]; then
         DATA_FACTOR=4
