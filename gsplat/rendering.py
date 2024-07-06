@@ -398,7 +398,7 @@ def rasterization(
         "width": width,
         "height": height,
         "tile_size": tile_size,
-        "render_distloss": render_distloss,
+        "render_distloss": render_distloss[..., :1],
     }
     return render_colors, render_alphas, meta
 

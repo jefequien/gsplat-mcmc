@@ -6,7 +6,6 @@
 
 namespace cg = cooperative_groups;
 
-
 /****************************************************************************
  * Rasterization to Pixels Forward Pass
  ****************************************************************************/
@@ -40,7 +39,7 @@ __global__ void rasterize_to_pixels_fwd_kernel(
     tile_offsets += camera_id * tile_height * tile_width;
     render_colors += camera_id * image_height * image_width * COLOR_DIM;
     render_alphas += camera_id * image_height * image_width;
-    render_distortions += camera_id * image_height * image_width;
+    render_distortions += camera_id * image_height * image_width * 3;
     last_ids += camera_id * image_height * image_width;
     if (backgrounds != nullptr) {
         backgrounds += camera_id * COLOR_DIM;
@@ -88,7 +87,9 @@ __global__ void rasterize_to_pixels_fwd_kernel(
     // Implemented reference:
     // https://github.com/nerfstudio-project/nerfacc/blob/master/nerfacc/losses.py#L7
     float distort = 0.f;
-    float accum_vis_depth = 0.f; // accumulated vis * depth
+    // float accum_vis_depth = 0.f; // accumulated vis * depth
+	float M1 = {0};
+	float M2 = {0};
 
     S pix_out[COLOR_DIM] = {0.f};
     for (uint32_t b = 0; b < num_batches; ++b) {
@@ -145,12 +146,21 @@ __global__ void rasterize_to_pixels_fwd_kernel(
 
             // the last channel of colors is depth
             const float depth = c_ptr[COLOR_DIM - 1];
-            // in nerfacc, loss_bi_0 = weights * t_mids * exclusive_sum(weights)
-            const float distort_bi_0 = vis * depth * (1.0f - T);
-            // in nerfacc, loss_bi_1 = weights * exclusive_sum(weights * t_mids)
-            const float distort_bi_1 = vis * accum_vis_depth;
-            distort += 2.0f * (distort_bi_0 - distort_bi_1);
-            accum_vis_depth += vis * depth;
+            // // in nerfacc, loss_bi_0 = weights * t_mids * exclusive_sum(weights)
+            // const float distort_bi_0 = vis * depth * (1.0f - T);
+            // // in nerfacc, loss_bi_1 = weights * exclusive_sum(weights * t_mids)
+            // const float distort_bi_1 = vis * accum_vis_depth;
+            // distort += 2.0f * (distort_bi_0 - distort_bi_1);
+            // accum_vis_depth += vis * depth;
+
+            // Render depth distortion map
+			// Efficient implementation of distortion loss, see 2DGS' paper appendix.
+			float A = 1-T;
+			float m = far_n / (far_n - near_n) * (1 - near_n / depth);
+			distort += (m * m * A + M2 - 2 * m * M1) * vis;
+			// accum_vis_depth += depth * vis;
+			M1 += m * vis;
+			M2 += m * m * vis;
 
             cur_idx = batch_start + t;
 
@@ -172,7 +182,9 @@ __global__ void rasterize_to_pixels_fwd_kernel(
         }
         // index in bin of last gaussian in this pixel
         last_ids[pix_id] = static_cast<int32_t>(cur_idx);
-        render_distortions[pix_id] = distort;
+        render_distortions[pix_id * 3] = distort;
+        render_distortions[pix_id * 3 + 1] = M1;
+        render_distortions[pix_id * 3 + 2] = M2;
     }
 }
 
@@ -218,7 +230,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> call_kern
                                          means2d.options().dtype(torch::kFloat32));
     torch::Tensor alphas = torch::empty({C, image_height, image_width, 1},
                                         means2d.options().dtype(torch::kFloat32));
-    torch::Tensor distortions = torch::empty({C, image_height, image_width, 1},
+    torch::Tensor distortions = torch::empty({C, image_height, image_width, 3},
                                         means2d.options().dtype(torch::kFloat32));
     torch::Tensor last_ids = torch::empty({C, image_height, image_width},
                                           means2d.options().dtype(torch::kInt32));

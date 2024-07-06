@@ -850,6 +850,7 @@ class _RasterizeToPixels(torch.autograd.Function):
             flatten_ids,
             render_colors,
             render_alphas,
+            render_distloss,
             last_ids,
         )
         ctx.width = width
@@ -878,6 +879,7 @@ class _RasterizeToPixels(torch.autograd.Function):
             flatten_ids,
             render_colors,
             render_alphas,
+            render_distloss,
             last_ids,
         ) = ctx.saved_tensors
         width = ctx.width
@@ -904,6 +906,7 @@ class _RasterizeToPixels(torch.autograd.Function):
             flatten_ids,
             render_colors,
             render_alphas,
+            render_distloss,
             last_ids,
             v_render_colors.contiguous(),
             v_render_alphas.contiguous(),

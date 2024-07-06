@@ -12,6 +12,9 @@
 
 namespace cg = cooperative_groups;
 
+__device__ const float near_n = 0.2;
+__device__ const float far_n = 100.0;
+
 template <uint32_t DIM, class T, class WarpT>
 inline __device__ void warpSum(T *val, WarpT &warp) {
     PRAGMA_UNROLL
