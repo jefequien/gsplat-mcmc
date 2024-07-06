@@ -753,7 +753,7 @@ class Runner:
                 depths = renders[..., -1:]
                 depths = (depths - depths.min()) / (depths.max() - depths.min())
                 canvas_list.append(apply_float_colormap(1 - depths, colormap="turbo"))
-            if True: # cfg.normal_consistency_loss:
+            if renders.shape[-1] >= 5: # cfg.normal_consistency_loss:
                 depths = renders[..., -1:]
                 normals = renders[..., -4:-1]
                 normals_surf = depth_to_normal(
@@ -855,7 +855,7 @@ class Runner:
                 depths = renders[..., -1:]
                 depths = (depths - depths.min()) / (depths.max() - depths.min())
                 canvas_list.append(apply_float_colormap(1 - depths, colormap="turbo"))
-            if True: # cfg.normal_consistency_loss:
+            if renders.shape[-1] >= 5: # cfg.normal_consistency_loss:
                 depths = renders[..., -1:]
                 normals = renders[..., -4:-1]
                 normals_surf = depth_to_normal(
