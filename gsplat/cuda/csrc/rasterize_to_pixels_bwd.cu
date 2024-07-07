@@ -235,16 +235,18 @@ __global__ void rasterize_to_pixels_bwd_kernel(
                 // v_rgb_local[COLOR_DIM - 1] +=
                 //     2.0f * fac * (2.0f - 2.0f * T - accum_w + fac) * v_distort;
 
-                float dL_dz = 0.0f;
-			    float dL_dweight = 0;
-                const float m_d = far_n / (far_n - near_n) * (1 - near_n / depth);
-			    const float dmd_dd = (far_n * near_n) / ((far_n - near_n) * depth * depth);
-    			dL_dweight += (final_D2 + m_d * m_d * final_A - 2 * m_d * final_D) * v_distort;
-                v_alpha += dL_dweight - last_dL_dT;
-                // propagate the current weight W_{i} to next weight W_{i-1}
-                last_dL_dT = dL_dweight * alpha + (1 - alpha) * last_dL_dT;
-                const float dL_dmd = 2.0f * (T * alpha) * (m_d * final_A - final_D) * v_distort;
-                v_rgb_local[COLOR_DIM - 1] += dL_dmd * dmd_dd;
+                if (depth >= near_n) {
+                    float dL_dz = 0.0f;
+                    float dL_dweight = 0;
+                    const float m_d = far_n / (far_n - near_n) * (1 - near_n / depth);
+                    const float dmd_dd = (far_n * near_n) / ((far_n - near_n) * depth * depth);
+                    dL_dweight += (final_D2 + m_d * m_d * final_A - 2 * m_d * final_D) * v_distort;
+                    v_alpha += dL_dweight - last_dL_dT;
+                    // propagate the current weight W_{i} to next weight W_{i-1}
+                    last_dL_dT = dL_dweight * alpha + (1 - alpha) * last_dL_dT;
+                    const float dL_dmd = 2.0f * (T * alpha) * (m_d * final_A - final_D) * v_distort;
+                    v_rgb_local[COLOR_DIM - 1] += dL_dmd * dmd_dd;
+                }
 
                 if (opac * vis <= 0.999f) {
                     const S v_sigma = -opac * vis * v_alpha;

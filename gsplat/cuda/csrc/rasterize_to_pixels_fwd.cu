@@ -153,14 +153,16 @@ __global__ void rasterize_to_pixels_fwd_kernel(
             // distort += 2.0f * (distort_bi_0 - distort_bi_1);
             // accum_vis_depth += vis * depth;
 
-            // Render depth distortion map
-			// Efficient implementation of distortion loss, see 2DGS' paper appendix.
-			float A = 1-T;
-			float m = far_n / (far_n - near_n) * (1 - near_n / depth);
-			distort += (m * m * A + M2 - 2 * m * M1) * vis;
-			// accum_vis_depth += depth * vis;
-			M1 += m * vis;
-			M2 += m * m * vis;
+            if (depth >= near_n) {
+                // Render depth distortion map
+                // Efficient implementation of distortion loss, see 2DGS' paper appendix.
+                float A = 1-T;
+                float m = far_n / (far_n - near_n) * (1 - near_n / depth);
+                distort += (m * m * A + M2 - 2 * m * M1) * vis;
+                // accum_vis_depth += depth * vis;
+                M1 += m * vis;
+                M2 += m * m * vis;
+            }
 
             cur_idx = batch_start + t;
 
