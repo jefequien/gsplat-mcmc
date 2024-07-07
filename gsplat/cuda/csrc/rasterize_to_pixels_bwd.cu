@@ -102,7 +102,7 @@ __global__ void rasterize_to_pixels_bwd_kernel(
     const S v_render_a = v_render_alphas[pix_id];
 
     // prepare for distortion
-    float v_distort = 0.f;
+    // float v_distort = 0.f;
     // float accum_d, accum_w;
     // float accum_d_buffer, accum_w_buffer, distort_buffer;
     // v_distort = v_render_distortions[pix_id];
@@ -113,13 +113,12 @@ __global__ void rasterize_to_pixels_bwd_kernel(
     // accum_w = accum_w_buffer;
     // distort_buffer = 0.f;
 
+    float v_distort = 0.f;
     v_distort = v_render_distortions[pix_id * 3];
 
 	const float final_D = inside ? render_distortions[pix_id * 3 + 1] : 0;
 	const float final_D2 = inside ? render_distortions[pix_id * 3 + 2] : 0;
     // for compute gradient with respect to the distortion map
-	// const float final_D = inside ? final_Ts[pix_id + image_height * image_width] : 0;
-	// const float final_D2 = inside ? final_Ts[pix_id + 2 * image_height * image_width] : 0;
 	const float final_A = 1 - T_final;
     float last_dL_dT = 0;
 
@@ -223,17 +222,20 @@ __global__ void rasterize_to_pixels_bwd_kernel(
                 // contribution from distortion
                 // last channel of colors is depth
                 float depth = rgbs_batch[t * COLOR_DIM + COLOR_DIM - 1];
-                // float dl_dw =
-                //     2.0f * (2.0f * (depth * accum_w_buffer - accum_d_buffer) +
-                //             (accum_d - depth * accum_w));
-                // // df / d(alpha)
-                // v_alpha += (dl_dw * T - distort_buffer * ra) * v_distort;
-                // accum_d_buffer -= fac * depth;
-                // accum_w_buffer -= fac;
-                // distort_buffer += dl_dw * fac;
-                // // df / d(depth). put it in the last channel of v_rgb
-                // v_rgb_local[COLOR_DIM - 1] +=
-                //     2.0f * fac * (2.0f - 2.0f * T - accum_w + fac) * v_distort;
+                // if (depth >= near_n) {
+                //     depth = far_n / (far_n - near_n) * (1 - near_n / depth);
+                //     float dl_dw =
+                //         2.0f * (2.0f * (depth * accum_w_buffer - accum_d_buffer) +
+                //                 (accum_d - depth * accum_w));
+                //     // df / d(alpha)
+                //     v_alpha += (dl_dw * T - distort_buffer * ra) * v_distort;
+                //     accum_d_buffer -= fac * depth;
+                //     accum_w_buffer -= fac;
+                //     distort_buffer += dl_dw * fac;
+                //     // df / d(depth). put it in the last channel of v_rgb
+                //     v_rgb_local[COLOR_DIM - 1] +=
+                //         2.0f * fac * (2.0f - 2.0f * T - accum_w + fac) * v_distort;
+                // }
 
                 if (depth >= near_n) {
                     float dL_dz = 0.0f;

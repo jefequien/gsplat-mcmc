@@ -87,7 +87,7 @@ __global__ void rasterize_to_pixels_fwd_kernel(
     // Implemented reference:
     // https://github.com/nerfstudio-project/nerfacc/blob/master/nerfacc/losses.py#L7
     float distort = 0.f;
-    // float accum_vis_depth = 0.f; // accumulated vis * depth
+    float accum_vis_depth = 0.f; // accumulated vis * depth
 	float M1 = {0};
 	float M2 = {0};
 
@@ -145,13 +145,16 @@ __global__ void rasterize_to_pixels_fwd_kernel(
             }
 
             // the last channel of colors is depth
-            const float depth = c_ptr[COLOR_DIM - 1];
-            // // in nerfacc, loss_bi_0 = weights * t_mids * exclusive_sum(weights)
-            // const float distort_bi_0 = vis * depth * (1.0f - T);
-            // // in nerfacc, loss_bi_1 = weights * exclusive_sum(weights * t_mids)
-            // const float distort_bi_1 = vis * accum_vis_depth;
-            // distort += 2.0f * (distort_bi_0 - distort_bi_1);
-            // accum_vis_depth += vis * depth;
+            float depth = c_ptr[COLOR_DIM - 1];
+            // if (depth >= near_n) {
+            //     depth = far_n / (far_n - near_n) * (1 - near_n / depth);
+            //     // in nerfacc, loss_bi_0 = weights * t_mids * exclusive_sum(weights)
+            //     const float distort_bi_0 = vis * depth * (1.0f - T);
+            //     // in nerfacc, loss_bi_1 = weights * exclusive_sum(weights * t_mids)
+            //     const float distort_bi_1 = vis * accum_vis_depth;
+            //     distort += 2.0f * (distort_bi_0 - distort_bi_1);
+            //     accum_vis_depth += vis * depth;
+            // }
 
             if (depth >= near_n) {
                 // Render depth distortion map

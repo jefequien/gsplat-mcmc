@@ -1,5 +1,6 @@
 # for SCENE in bicycle bonsai counter garden kitchen room stump treehill flowers;
-for SCENE in garden treehill bicycle bonsai kitchen;
+# for SCENE in garden treehill bicycle bonsai kitchen;
+for SCENE in garden;
 do
     if [ "$SCENE" = "bicycle" ] || [ "$SCENE" = "stump" ] || [ "$SCENE" = "garden" ] || [ "$SCENE" = "treehill" ] || [ "$SCENE" = "flowers" ]; then
         DATA_FACTOR=4
@@ -37,7 +38,7 @@ do
         --normal_consistency_loss \
         --dist_loss \
         --dist_lambda 10 \
-        --result_dir results/3dgs_with_normal/$SCENE/
+        --result_dir results/3dgs_with_normal10/$SCENE/
 
     # python simple_trainer_mcmc.py --eval_steps $EVAL_STEPS --disable_viewer --data_factor $DATA_FACTOR \
     #     --model_type 2dgs_inria \
@@ -54,7 +55,7 @@ do
     #     --normal_consistency_loss \
     #     --dist_loss \
     #     --dist_lambda 100 \
-    #     --result_dir results/2dgs_inria_with_normal/$SCENE/
+    #     --result_dir results/2dgs_inria_with_normal1000/$SCENE/
 
     # python simple_trainer_mcmc.py --eval_steps $EVAL_STEPS --disable_viewer --data_factor $DATA_FACTOR \
     #     --model_type 3dgs_inria \
