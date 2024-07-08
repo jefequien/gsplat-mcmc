@@ -165,6 +165,7 @@ __global__ void rasterize_to_pixels_bwd_kernel(
             typename Float2<S>::type delta;
             typename Float3<S>::type conic;
             S vis;
+            S depth;
 
             if (valid) {
                 conic = conic_batch[t];
@@ -177,6 +178,11 @@ __global__ void rasterize_to_pixels_bwd_kernel(
                 vis = __expf(-sigma);
                 alpha = min(0.999f, opac * vis);
                 if (sigma < 0.f || alpha < 1.f / 255.f) {
+                    valid = false;
+                }
+
+                depth = rgbs_batch[t * COLOR_DIM + COLOR_DIM - 1];
+			    if (depth < near_n) {
                     valid = false;
                 }
             }
@@ -221,34 +227,29 @@ __global__ void rasterize_to_pixels_bwd_kernel(
                 
                 // contribution from distortion
                 // last channel of colors is depth
-                float depth = rgbs_batch[t * COLOR_DIM + COLOR_DIM - 1];
-                // if (depth >= near_n) {
-                //     depth = far_n / (far_n - near_n) * (1 - near_n / depth);
-                //     float dl_dw =
-                //         2.0f * (2.0f * (depth * accum_w_buffer - accum_d_buffer) +
-                //                 (accum_d - depth * accum_w));
-                //     // df / d(alpha)
-                //     v_alpha += (dl_dw * T - distort_buffer * ra) * v_distort;
-                //     accum_d_buffer -= fac * depth;
-                //     accum_w_buffer -= fac;
-                //     distort_buffer += dl_dw * fac;
-                //     // df / d(depth). put it in the last channel of v_rgb
-                //     v_rgb_local[COLOR_DIM - 1] +=
-                //         2.0f * fac * (2.0f - 2.0f * T - accum_w + fac) * v_distort;
-                // }
+                // float depth = rgbs_batch[t * COLOR_DIM + COLOR_DIM - 1];
+                // depth = far_n / (far_n - near_n) * (1 - near_n / depth);
+                // float dl_dw =
+                //     2.0f * (2.0f * (depth * accum_w_buffer - accum_d_buffer) +
+                //             (accum_d - depth * accum_w));
+                // // df / d(alpha)
+                // v_alpha += (dl_dw * T - distort_buffer * ra) * v_distort;
+                // accum_d_buffer -= fac * depth;
+                // accum_w_buffer -= fac;
+                // distort_buffer += dl_dw * fac;
+                // // df / d(depth). put it in the last channel of v_rgb
+                // v_rgb_local[COLOR_DIM - 1] +=
+                //     2.0f * fac * (2.0f - 2.0f * T - accum_w + fac) * v_distort;
 
-                if (depth >= near_n) {
-                    float dL_dz = 0.0f;
-                    float dL_dweight = 0;
-                    const float m_d = far_n / (far_n - near_n) * (1 - near_n / depth);
-                    const float dmd_dd = (far_n * near_n) / ((far_n - near_n) * depth * depth);
-                    dL_dweight += (final_D2 + m_d * m_d * final_A - 2 * m_d * final_D) * v_distort;
-                    v_alpha += dL_dweight - last_dL_dT;
-                    // propagate the current weight W_{i} to next weight W_{i-1}
-                    last_dL_dT = dL_dweight * alpha + (1 - alpha) * last_dL_dT;
-                    const float dL_dmd = 2.0f * (T * alpha) * (m_d * final_A - final_D) * v_distort;
-                    v_rgb_local[COLOR_DIM - 1] += dL_dmd * dmd_dd;
-                }
+                float dL_dweight = 0;
+                const float m_d = far_n / (far_n - near_n) * (1 - near_n / depth);
+                const float dmd_dd = (far_n * near_n) / ((far_n - near_n) * depth * depth);
+                dL_dweight += (final_D2 + m_d * m_d * final_A - 2 * m_d * final_D) * v_distort;
+                v_alpha += dL_dweight - last_dL_dT;
+                // propagate the current weight W_{i} to next weight W_{i-1}
+                last_dL_dT = dL_dweight * alpha + (1 - alpha) * last_dL_dT;
+                const float dL_dmd = 2.0f * (T * alpha) * (m_d * final_A - final_D) * v_distort;
+                v_rgb_local[COLOR_DIM - 1] += dL_dmd * dmd_dd;
 
                 if (opac * vis <= 0.999f) {
                     const S v_sigma = -opac * vis * v_alpha;

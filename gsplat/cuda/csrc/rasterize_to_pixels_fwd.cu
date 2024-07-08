@@ -130,42 +130,45 @@ __global__ void rasterize_to_pixels_fwd_kernel(
                 continue;
             }
 
+            int32_t g = id_batch[t];
+            const S *c_ptr = colors + g * COLOR_DIM;
+            float depth = c_ptr[COLOR_DIM - 1];
+            if (depth < near_n) {
+                continue;
+            }
+
             const S next_T = T * (1.0f - alpha);
             if (next_T <= 1e-4) { // this pixel is done: exclusive
                 done = true;
                 break;
             }
 
-            int32_t g = id_batch[t];
+            // int32_t g = id_batch[t];
             const S vis = alpha * T;
-            const S *c_ptr = colors + g * COLOR_DIM;
+            // const S *c_ptr = colors + g * COLOR_DIM;
             PRAGMA_UNROLL
             for (uint32_t k = 0; k < COLOR_DIM; ++k) {
                 pix_out[k] += c_ptr[k] * vis;
             }
 
             // the last channel of colors is depth
-            float depth = c_ptr[COLOR_DIM - 1];
-            // if (depth >= near_n) {
-            //     depth = far_n / (far_n - near_n) * (1 - near_n / depth);
-            //     // in nerfacc, loss_bi_0 = weights * t_mids * exclusive_sum(weights)
-            //     const float distort_bi_0 = vis * depth * (1.0f - T);
-            //     // in nerfacc, loss_bi_1 = weights * exclusive_sum(weights * t_mids)
-            //     const float distort_bi_1 = vis * accum_vis_depth;
-            //     distort += 2.0f * (distort_bi_0 - distort_bi_1);
-            //     accum_vis_depth += vis * depth;
-            // }
+            // float depth = c_ptr[COLOR_DIM - 1];
+            // depth = far_n / (far_n - near_n) * (1 - near_n / depth);
+            // // in nerfacc, loss_bi_0 = weights * t_mids * exclusive_sum(weights)
+            // const float distort_bi_0 = vis * depth * (1.0f - T);
+            // // in nerfacc, loss_bi_1 = weights * exclusive_sum(weights * t_mids)
+            // const float distort_bi_1 = vis * accum_vis_depth;
+            // distort += 2.0f * (distort_bi_0 - distort_bi_1);
+            // accum_vis_depth += vis * depth;
 
-            if (depth >= near_n) {
-                // Render depth distortion map
-                // Efficient implementation of distortion loss, see 2DGS' paper appendix.
-                float A = 1-T;
-                float m = far_n / (far_n - near_n) * (1 - near_n / depth);
-                distort += (m * m * A + M2 - 2 * m * M1) * vis;
-                // accum_vis_depth += depth * vis;
-                M1 += m * vis;
-                M2 += m * m * vis;
-            }
+            // Render depth distortion map
+            // Efficient implementation of distortion loss, see 2DGS' paper appendix.
+            float A = 1-T;
+            float m = far_n / (far_n - near_n) * (1 - near_n / depth);
+            distort += (m * m * A + M2 - 2 * m * M1) * vis;
+            // accum_vis_depth += depth * vis;
+            M1 += m * vis;
+            M2 += m * m * vis;
 
             cur_idx = batch_start + t;
 
