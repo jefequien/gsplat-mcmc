@@ -156,7 +156,7 @@ class Config:
     # Distoration loss. (experimental)
     dist_loss: bool = False
     # Weight for distortion loss
-    dist_lambda: float = 0.1
+    dist_lambda: float = 100
     # Start applying distortion loss after this iteration
     dist_start_iter: int = 3000
 
