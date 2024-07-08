@@ -477,8 +477,7 @@ class Runner:
                     near_plane=cfg.near_plane,
                     far_plane=cfg.far_plane,
                 )
-                if alphas is not None:
-                    normals_surf = normals_surf * (alphas).detach()
+                normals_surf = normals_surf * (alphas).detach()
                 normalconsistencyloss = (
                     1 - (normals * normals_surf).sum(dim=-1)
                 ).mean()
@@ -755,7 +754,7 @@ class Runner:
                 depths = renders[..., -1:]
                 depths = (depths - depths.min()) / (depths.max() - depths.min())
                 canvas_list.append(apply_float_colormap(1 - depths, colormap="turbo"))
-            if renders.shape[-1] >= 5:  # cfg.normal_consistency_loss:
+            if cfg.normal_consistency_loss:
                 depths = renders[..., -1:]
                 normals = renders[..., -4:-1]
                 normals_surf = depth_to_normal(
@@ -765,8 +764,7 @@ class Runner:
                     near_plane=cfg.near_plane,
                     far_plane=cfg.far_plane,
                 )
-                if alphas is not None:
-                    normals_surf = normals_surf * (alphas).detach()
+                normals_surf = normals_surf * (alphas).detach()
                 canvas_list.extend([normals * 0.5 + 0.5])
                 canvas_list.extend([normals_surf * 0.5 + 0.5])
             if cfg.dist_loss:
@@ -859,7 +857,7 @@ class Runner:
                 depths = renders[..., -1:]
                 depths = (depths - depths.min()) / (depths.max() - depths.min())
                 canvas_list.append(apply_float_colormap(1 - depths, colormap="turbo"))
-            if renders.shape[-1] >= 5:  # cfg.normal_consistency_loss:
+            if cfg.normal_consistency_loss:
                 depths = renders[..., -1:]
                 normals = renders[..., -4:-1]
                 normals_surf = depth_to_normal(
@@ -869,8 +867,7 @@ class Runner:
                     near_plane=cfg.near_plane,
                     far_plane=cfg.far_plane,
                 )
-                if alphas is not None:
-                    normals_surf = normals_surf * (alphas).detach()
+                normals_surf = normals_surf * (alphas).detach()
                 canvas_list.extend([normals * 0.5 + 0.5])
                 canvas_list.extend([normals_surf * 0.5 + 0.5])
             if cfg.dist_loss:
