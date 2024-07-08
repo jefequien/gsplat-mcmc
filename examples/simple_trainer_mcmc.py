@@ -477,7 +477,8 @@ class Runner:
                     near_plane=cfg.near_plane,
                     far_plane=cfg.far_plane,
                 )
-                normals_surf = normals_surf * (alphas).detach()
+                if alphas is not None:
+                    normals_surf = normals_surf * (alphas).detach()
                 normalconsistencyloss = (
                     1 - (normals * normals_surf).sum(dim=-1)
                 ).mean()
@@ -764,7 +765,8 @@ class Runner:
                     near_plane=cfg.near_plane,
                     far_plane=cfg.far_plane,
                 )
-                normals_surf = normals_surf * (alphas).detach()
+                if alphas is not None:
+                    normals_surf = normals_surf * (alphas).detach()
                 canvas_list.extend([normals * 0.5 + 0.5])
                 canvas_list.extend([normals_surf * 0.5 + 0.5])
             if cfg.dist_loss:
@@ -867,7 +869,8 @@ class Runner:
                     near_plane=cfg.near_plane,
                     far_plane=cfg.far_plane,
                 )
-                normals_surf = normals_surf * (alphas).detach()
+                if alphas is not None:
+                    normals_surf = normals_surf * (alphas).detach()
                 canvas_list.extend([normals * 0.5 + 0.5])
                 canvas_list.extend([normals_surf * 0.5 + 0.5])
             if cfg.dist_loss:
