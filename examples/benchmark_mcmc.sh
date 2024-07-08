@@ -37,8 +37,8 @@ do
         --data_dir data/360_v2/$SCENE/ \
         --normal_consistency_loss \
         --dist_loss \
-        --dist_lambda 10 \
-        --result_dir results/3dgs_with_normal10/$SCENE/
+        --dist_lambda 0 \
+        --result_dir results/3dgs_with_normal/$SCENE/
 
     # python simple_trainer_mcmc.py --eval_steps $EVAL_STEPS --disable_viewer --data_factor $DATA_FACTOR \
     #     --model_type 2dgs_inria \
