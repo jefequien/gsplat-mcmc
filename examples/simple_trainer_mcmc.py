@@ -31,7 +31,7 @@ from gsplat.rendering import (
     rasterization_inria_wrapper,
 )
 from gsplat.relocation import compute_relocation
-from gsplat.normal_utils import depth_to_normal
+from gsplat.normal_utils import depth_to_normal, depth_to_rays
 from simple_trainer import create_splats_with_optimizers
 
 
@@ -272,6 +272,27 @@ class Runner:
                     lr=cfg.app_opt_lr * math.sqrt(cfg.batch_size),
                 ),
             ]
+        
+        self.bkgd_optimizers = []
+        if True:
+            # bkgd = torch.nn.Parameter(torch.rand(1, 3, device=device))
+            # params.append(("bkgd", bkgd, 1e-3))
+            self.bkgd = torch.nn.Sequential(
+                torch.nn.Linear(3, 64),
+                torch.nn.ReLU(),
+                torch.nn.Linear(64,64),
+                torch.nn.ReLU(),
+                torch.nn.Linear(64,64),
+                torch.nn.ReLU(),
+                torch.nn.Linear(64,3),
+                torch.nn.Sigmoid(),
+            ).to(self.device)
+            self.bkgd_optimizers = [
+                torch.optim.Adam(
+                    self.bkgd.parameters(),
+                    lr=1e-3 * math.sqrt(cfg.batch_size),
+                )
+            ]
 
         # Losses & Metrics.
         self.ssim = StructuralSimilarityIndexMeasure(data_range=1.0).to(self.device)
@@ -333,6 +354,20 @@ class Runner:
             rasterize_mode=rasterize_mode,
             **kwargs,
         )
+        
+        depths = render_colors[..., -1:]
+        rays = depth_to_rays(
+            depths,
+            camtoworlds,
+            Ks,
+            near_plane=cfg.near_plane,
+            far_plane=cfg.far_plane,
+        )
+        rays = F.normalize(rays, dim=-1)
+        bkgd = self.bkgd(rays)
+        bkgd = bkgd.reshape(depths.shape[1], depths.shape[2], 3)
+        render_colors[..., :3] += bkgd * (1.0 - render_alphas)
+        info["bkgd"] = bkgd
         return render_colors, render_alphas, info
 
     def train(self):
@@ -422,9 +457,9 @@ class Runner:
             )
             colors = renders[..., :3]
 
-            if cfg.random_bkgd:
-                bkgd = torch.rand(1, 3, device=device)
-                colors = colors + bkgd * (1.0 - alphas)
+            # if cfg.random_bkgd:
+            #     bkgd = torch.Parameter()
+            #     colors = colors + self.bkgd * (1.0 - alphas)
 
             # loss
             l1loss = F.l1_loss(colors, pixels)
@@ -476,6 +511,27 @@ class Runner:
                 if step > cfg.normal_consistency_start_iter:
                     loss += normalconsistencyloss * cfg.normal_consistency_lambda
 
+            # for those pixel are well represented by bg and has low alpha, we encourage the gaussian to be transparent
+            bg_mask = torch.abs(pixels - info["bkgd"]).mean(dim=-1, keepdim=True) < 0.003
+            # use a box filter to avoid penalty high frequency parts
+            f = 3
+            window = (torch.ones((f, f)).view(1, 1, f, f) / (f * f)).cuda()
+            bg_mask = (
+                torch.nn.functional.conv2d(
+                    bg_mask.float().permute(0, 3, 1, 2),
+                    window,
+                    stride=1,
+                    padding="same",
+                )
+                .permute(0, 2, 3, 1)
+            )
+            alpha_mask = bg_mask > 0.6
+            # prevent NaN
+            if alpha_mask.sum() != 0:
+                alphaloss = alphas[alpha_mask].mean() * 0.15
+            else:
+                alphaloss = torch.tensor(0.0).to(self.device)
+
             loss.backward()
 
             desc = f"loss={loss.item():.3f}| " f"sh degree={sh_degree_to_use}| "
@@ -504,6 +560,7 @@ class Runner:
                         normalconsistencyloss.item(),
                         step,
                     )
+                self.writer.add_scalar("train/alphaloss", alphaloss.item(), step)
                 if cfg.tb_save_image:
                     canvas = torch.cat([pixels, colors], dim=2).detach().cpu().numpy()
                     canvas = canvas.reshape(-1, *canvas.shape[2:])
@@ -546,6 +603,9 @@ class Runner:
             for optimizer in self.app_optimizers:
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)
+            for optimizer in self.bkgd_optimizers:
+                optimizer.step()
+                optimizer.zero_grad(set_to_none=True)
             for scheduler in schedulers:
                 scheduler.step()
 
@@ -568,6 +628,7 @@ class Runner:
                     {
                         "step": step,
                         "splats": self.splats.state_dict(),
+                        "bkgd": self.bkgd.state_dict(),
                     },
                     f"{self.ckpt_dir}/ckpt_{step}.pt",
                 )
@@ -892,6 +953,7 @@ def main(cfg: Config):
         ckpt = torch.load(cfg.ckpt, map_location=runner.device)
         for k in runner.splats.keys():
             runner.splats[k].data = ckpt["splats"][k]
+            runner.bkgd.load_state_dict(ckpt["bkgd"])
         runner.eval(step=ckpt["step"])
         runner.render_traj(step=ckpt["step"])
     else:

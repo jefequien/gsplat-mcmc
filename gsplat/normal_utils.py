@@ -5,7 +5,7 @@ import numpy as np
 import math
 
 
-def _depths_to_points(depthmap, world_view_transform, full_proj_transform):
+def _depths_to_points(depthmap, world_view_transform, full_proj_transform, ray=False):
     c2w = (world_view_transform.T).inverse()
     H, W = depthmap.shape[:2]
     ndc2pix = (
@@ -26,6 +26,8 @@ def _depths_to_points(depthmap, world_view_transform, full_proj_transform):
         -1, 3
     )
     rays_d = points @ intrins.inverse().T @ c2w[:3, :3].T
+    if ray:
+        return rays_d
     rays_o = c2w[:3, 3]
     points = depthmap.reshape(-1, 1) * rays_d + rays_o
     return points
@@ -63,6 +65,21 @@ def depth_to_normal(depths, camtoworlds, Ks, near_plane, far_plane):
     normals = torch.stack(normals, dim=0)
     return normals
 
+def depth_to_rays(depths, camtoworlds, Ks, near_plane, far_plane):
+    height, width = depths.shape[1:3]
+    viewmats = torch.linalg.inv(camtoworlds)  # [C, 4, 4]
+    
+    FoVx = 2 * math.atan(width / (2 * Ks[0, 0, 0].item()))
+    FoVy = 2 * math.atan(height / (2 * Ks[0, 1, 1].item()))
+    world_view_transform = viewmats[0].transpose(0, 1)
+    projection_matrix = _getProjectionMatrix(
+        znear=near_plane, zfar=far_plane, fovX=FoVx, fovY=FoVy, device=depths.device
+    ).transpose(0, 1)
+    full_proj_transform = (
+        world_view_transform.unsqueeze(0).bmm(projection_matrix.unsqueeze(0))
+    ).squeeze(0)
+    ray_o = _depths_to_points(depths[0], world_view_transform, full_proj_transform, ray=True)
+    return ray_o
 
 def _getProjectionMatrix(znear, zfar, fovX, fovY, device="cuda"):
     tanHalfFovY = math.tan((fovY / 2))
