@@ -32,6 +32,7 @@ from gsplat.rendering import (
 )
 from gsplat.relocation import compute_relocation
 from gsplat.normal_utils import depth_to_normal, depth_to_rays
+from gsplat.color_utils import apply_float_colormap
 from simple_trainer import create_splats_with_optimizers
 
 
@@ -184,7 +185,7 @@ class Runner:
         else:
             raise ValueError(f"Unsupported model type: {cfg.model_type}")
 
-        self.render_mode = "RGB"
+        self.render_mode = "RGB+ED"
         if cfg.depth_loss or cfg.normal_consistency_loss:
             self.render_mode = "RGB+ED"
 
@@ -531,6 +532,7 @@ class Runner:
                 alphaloss = alphas[alpha_mask].mean() * 0.15
             else:
                 alphaloss = torch.tensor(0.0).to(self.device)
+            loss += alphaloss
 
             loss.backward()
 
@@ -796,10 +798,11 @@ class Runner:
 
             colors = torch.clamp(renders[..., 0:3], 0.0, 1.0)
             canvas_list = [pixels, colors]
-            if cfg.depth_loss:
+            if True: #cfg.depth_loss:
                 depths = renders[..., -1:]
                 depths = (depths - depths.min()) / (depths.max() - depths.min())
-                canvas_list.append(depths)
+                depths[depths == 0] = 1.0
+                canvas_list.append(apply_float_colormap(depths, "turbo"))
             if cfg.normal_consistency_loss:
                 depths = renders[..., -1:]
                 normals = renders[..., -4:-1]
@@ -891,10 +894,11 @@ class Runner:
 
             colors = torch.clamp(renders[..., 0:3], 0.0, 1.0)
             canvas_list = [colors]
-            if cfg.depth_loss:
+            if True: #cfg.depth_loss:
                 depths = renders[..., -1:]
                 depths = (depths - depths.min()) / (depths.max() - depths.min())
-                canvas_list.append(depths)
+                depths[depths == 0] = 1.0
+                canvas_list.append(apply_float_colormap(depths, "turbo"))
             if cfg.normal_consistency_loss:
                 depths = renders[..., -1:]
                 normals = renders[..., -4:-1]
