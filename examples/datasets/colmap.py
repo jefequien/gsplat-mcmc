@@ -33,6 +33,7 @@ class Parser:
         factor: int = 1,
         normalize: bool = False,
         test_every: int = 8,
+        no_factor_suffix: bool = False,
     ):
         self.data_dir = data_dir
         self.factor = factor
@@ -132,7 +133,7 @@ class Parser:
         camera_ids = [camera_ids[i] for i in inds]
 
         # Load images.
-        if factor > 1:
+        if factor > 1 and not no_factor_suffix:
             image_dir_suffix = f"_{factor}"
         else:
             image_dir_suffix = ""

@@ -212,6 +212,8 @@ class Runner:
 
         # Tensorboard
         self.writer = SummaryWriter(log_dir=f"{cfg.result_dir}/tb")
+        with open(os.path.join(self.cfg.data_dir, "ext_metadata.json")) as f:
+            self.extconf = json.load(f)
 
         # Load data: Training data should contain initial points and colors.
         self.parser = Parser(
@@ -219,6 +221,7 @@ class Runner:
             factor=cfg.data_factor,
             normalize=True,
             test_every=cfg.test_every,
+            no_factor_suffix=self.extconf["no_factor_suffix"],
         )
         self.trainset = Dataset(
             self.parser,
@@ -874,7 +877,9 @@ class Runner:
                 bounds = np.array([0.01, 1.0])
             bounds *= self.parser.scene_scale
             camtoworlds_all = generate_spiral_path(
-                camtoworlds_all, bounds, spiral_scale_r=0.5
+                camtoworlds_all,
+                bounds,
+                spiral_scale_r=self.extconf["spiral_radius_scale"],
             )
         else:
             raise ValueError(f"Trajectory type not supported: {render_traj_type}")
