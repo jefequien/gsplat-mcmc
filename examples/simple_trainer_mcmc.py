@@ -14,7 +14,11 @@ import tyro
 import viser
 import nerfview
 from datasets.colmap import Dataset, Parser
-from datasets.traj import generate_interpolated_path
+from datasets.traj import (
+    generate_interpolated_path,
+    generate_ellipse_path_z,
+    generate_ellipse_path_y,
+)
 from torch import Tensor
 from torch.utils.tensorboard import SummaryWriter
 from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMeasure
@@ -34,6 +38,7 @@ from gsplat.relocation import compute_relocation
 from gsplat.normal_utils import depth_to_normal
 from simple_trainer import create_splats_with_optimizers
 import lib_bilagrid as bilateral_grids
+from gsplat.camera_utils import generate_spiral_path
 
 
 @dataclass
@@ -154,7 +159,7 @@ class Config:
     normal_consistency_start_iter: int = 7000
 
     # Enable bilateral grid optimization. (experimental)
-    bilateral_opt: bool = True
+    bilateral_opt: bool = False
     # Weight for tv loss
     bilateral_tv_lambda: float = 10
 
@@ -851,7 +856,29 @@ class Runner:
         device = self.device
 
         camtoworlds_all = self.parser.camtoworlds[5:-5]
-        camtoworlds_all = generate_interpolated_path(camtoworlds_all, 1)  # [N, 3, 4]
+        render_traj_type = "spiral"
+        if render_traj_type == "interp":
+            camtoworlds_all = generate_interpolated_path(
+                camtoworlds_all, 1
+            )  # [N, 3, 4]
+        elif render_traj_type == "ellipse_y":
+            camtoworlds_all = generate_ellipse_path_y(camtoworlds_all)  # [N, 3, 4]
+        elif render_traj_type == "ellipse_z":
+            camtoworlds_all = generate_ellipse_path_z(camtoworlds_all)  # [N, 3, 4]
+        elif render_traj_type == "spiral":
+            posefile = os.path.join(self.cfg.data_dir, "poses_bounds.npy")
+            if os.path.exists(posefile):
+                poses_arr = np.load(posefile)
+                bounds = poses_arr[:, -2:]
+            else:
+                bounds = np.array([0.01, 1.0])
+            bounds *= self.parser.scene_scale
+            camtoworlds_all = generate_spiral_path(
+                camtoworlds_all, bounds, spiral_scale_r=0.5
+            )
+        else:
+            raise ValueError(f"Trajectory type not supported: {render_traj_type}")
+
         camtoworlds_all = np.concatenate(
             [
                 camtoworlds_all,
