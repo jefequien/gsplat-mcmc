@@ -33,6 +33,7 @@ from gsplat.rendering import (
 from gsplat.relocation import compute_relocation
 from gsplat.normal_utils import depth_to_normal
 from simple_trainer import create_splats_with_optimizers
+import lib_bilagrid as bilateral_grids
 
 
 @dataclass
@@ -152,6 +153,11 @@ class Config:
     # Start applying normal consistency loss after this iteration
     normal_consistency_start_iter: int = 7000
 
+    # Enable bilateral grid optimization. (experimental)
+    bilateral_opt: bool = True
+    # Weight for tv loss
+    bilateral_tv_lambda: float = 10
+
     # Dump information to tensorboard every this steps
     tb_every: int = 100
     # Save training images to tensorboard
@@ -235,6 +241,7 @@ class Runner:
             feature_dim=feature_dim,
             device=self.device,
         )
+        self.bil_grids = bilateral_grids.BilateralGrid(len(self.trainset)).to(self.device)
         print("Model initialized. Number of GS:", len(self.splats["means3d"]))
 
         self.pose_optimizers = []
@@ -271,6 +278,19 @@ class Runner:
                     self.app_module.color_head.parameters(),
                     lr=cfg.app_opt_lr * math.sqrt(cfg.batch_size),
                 ),
+            ]
+        self.bil_optimizers = []
+        if cfg.bilateral_opt:
+            adam_kwargs = {
+                'betas': [0.9, 0.99],
+                'eps': 1e-15,
+            }
+            self.bil_optimizers = [
+                torch.optim.Adam(
+                        self.bil_grids.parameters(),
+                        lr=0.001 * math.sqrt(cfg.batch_size),
+                        **adam_kwargs,
+                    ),
             ]
 
         # Losses & Metrics.
@@ -359,6 +379,12 @@ class Runner:
                     self.pose_optimizers[0], gamma=0.01 ** (1.0 / max_steps)
                 )
             )
+        if cfg.bilateral_opt:
+            schedulers.append(
+                torch.optim.lr_scheduler.ExponentialLR(
+                    self.bil_optimizers[0], gamma=0.1 ** (1.0 / max_steps)
+                )
+            )
 
         trainloader = torch.utils.data.DataLoader(
             self.trainset,
@@ -421,6 +447,18 @@ class Runner:
                 render_mode=self.render_mode,
             )
             colors = renders[..., :3]
+            
+            if cfg.bilateral_opt:
+                grid_x, grid_y = torch.meshgrid(
+                    torch.arange(width, device="cuda").float(),
+                    torch.arange(height, device="cuda").float(),
+                    indexing="xy",
+                )
+                pix_xy = torch.stack([grid_x, grid_y], dim=-1).reshape(1, height, width, 2) + 0.5
+                pix_xy[..., 0] /= width
+                pix_xy[..., 1] /= height
+                bilgrid_results = bilateral_grids.slice(self.bil_grids, pix_xy, colors, image_ids)
+                colors = bilgrid_results['rgb']
 
             if cfg.random_bkgd:
                 bkgd = torch.rand(1, 3, device=device)
@@ -475,6 +513,10 @@ class Runner:
                 ).mean()
                 if step > cfg.normal_consistency_start_iter:
                     loss += normalconsistencyloss * cfg.normal_consistency_lambda
+            
+            if cfg.bilateral_opt:
+                tvloss = self.bil_grids.tv_loss()
+                loss += 10.0 * tvloss
 
             loss.backward()
 
@@ -504,6 +546,8 @@ class Runner:
                         normalconsistencyloss.item(),
                         step,
                     )
+                if cfg.bilateral_opt:
+                    self.writer.add_scalar("train/tvloss", tvloss.item(), step)
                 if cfg.tb_save_image:
                     canvas = torch.cat([pixels, colors], dim=2).detach().cpu().numpy()
                     canvas = canvas.reshape(-1, *canvas.shape[2:])
@@ -544,6 +588,9 @@ class Runner:
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)
             for optimizer in self.app_optimizers:
+                optimizer.step()
+                optimizer.zero_grad(set_to_none=True)
+            for optimizer in self.bil_optimizers:
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)
             for scheduler in schedulers:
