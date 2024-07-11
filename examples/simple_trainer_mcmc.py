@@ -212,8 +212,12 @@ class Runner:
 
         # Tensorboard
         self.writer = SummaryWriter(log_dir=f"{cfg.result_dir}/tb")
-        with open(os.path.join(self.cfg.data_dir, "ext_metadata.json")) as f:
-            self.extconf = json.load(f)
+        
+        self.extconf = {}
+        extconf_file = os.path.join(self.cfg.data_dir, "ext_metadata.json")
+        if os.path.exists(extconf_file):
+            with open(extconf_file) as f:
+                self.extconf = json.load(f)
 
         # Load data: Training data should contain initial points and colors.
         self.parser = Parser(
@@ -221,7 +225,7 @@ class Runner:
             factor=cfg.data_factor,
             normalize=True,
             test_every=cfg.test_every,
-            no_factor_suffix=self.extconf["no_factor_suffix"],
+            no_factor_suffix=self.extconf["no_factor_suffix"] if "no_factor_suffix" in self.extconf else False,
         )
         self.trainset = Dataset(
             self.parser,
@@ -859,7 +863,7 @@ class Runner:
         device = self.device
 
         camtoworlds_all = self.parser.camtoworlds[5:-5]
-        render_traj_type = "spiral"
+        render_traj_type = "ellipse_z"
         if render_traj_type == "interp":
             camtoworlds_all = generate_interpolated_path(
                 camtoworlds_all, 1
@@ -867,7 +871,8 @@ class Runner:
         elif render_traj_type == "ellipse_y":
             camtoworlds_all = generate_ellipse_path_y(camtoworlds_all)  # [N, 3, 4]
         elif render_traj_type == "ellipse_z":
-            camtoworlds_all = generate_ellipse_path_z(camtoworlds_all)  # [N, 3, 4]
+            height = camtoworlds_all[:,2,3].mean()
+            camtoworlds_all = generate_ellipse_path_z(camtoworlds_all, height=height)  # [N, 3, 4]
         elif render_traj_type == "spiral":
             posefile = os.path.join(self.cfg.data_dir, "poses_bounds.npy")
             if os.path.exists(posefile):
@@ -879,7 +884,7 @@ class Runner:
             camtoworlds_all = generate_spiral_path(
                 camtoworlds_all,
                 bounds,
-                spiral_scale_r=self.extconf["spiral_radius_scale"],
+                spiral_scale_r=self.extconf["spiral_radius_scale"] if "spiral_radius_scale" in self.extconf else 1.0,
             )
         else:
             raise ValueError(f"Trajectory type not supported: {render_traj_type}")
