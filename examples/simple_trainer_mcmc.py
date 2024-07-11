@@ -241,7 +241,9 @@ class Runner:
             feature_dim=feature_dim,
             device=self.device,
         )
-        self.bil_grids = bilateral_grids.BilateralGrid(len(self.trainset)).to(self.device)
+        self.bil_grids = bilateral_grids.BilateralGrid(len(self.trainset)).to(
+            self.device
+        )
         print("Model initialized. Number of GS:", len(self.splats["means3d"]))
 
         self.pose_optimizers = []
@@ -282,15 +284,15 @@ class Runner:
         self.bil_optimizers = []
         if cfg.bilateral_opt:
             adam_kwargs = {
-                'betas': [0.9, 0.99],
-                'eps': 1e-15,
+                "betas": [0.9, 0.99],
+                "eps": 1e-15,
             }
             self.bil_optimizers = [
                 torch.optim.Adam(
-                        self.bil_grids.parameters(),
-                        lr=0.001 * math.sqrt(cfg.batch_size),
-                        **adam_kwargs,
-                    ),
+                    self.bil_grids.parameters(),
+                    lr=0.001 * math.sqrt(cfg.batch_size),
+                    **adam_kwargs,
+                ),
             ]
 
         # Losses & Metrics.
@@ -447,18 +449,23 @@ class Runner:
                 render_mode=self.render_mode,
             )
             colors = renders[..., :3]
-            
+
             if cfg.bilateral_opt:
                 grid_x, grid_y = torch.meshgrid(
                     torch.arange(width, device="cuda").float(),
                     torch.arange(height, device="cuda").float(),
                     indexing="xy",
                 )
-                pix_xy = torch.stack([grid_x, grid_y], dim=-1).reshape(1, height, width, 2) + 0.5
+                pix_xy = (
+                    torch.stack([grid_x, grid_y], dim=-1).reshape(1, height, width, 2)
+                    + 0.5
+                )
                 pix_xy[..., 0] /= width
                 pix_xy[..., 1] /= height
-                bilgrid_results = bilateral_grids.slice(self.bil_grids, pix_xy, colors, image_ids)
-                colors = bilgrid_results['rgb']
+                bilgrid_results = bilateral_grids.slice(
+                    self.bil_grids, pix_xy, colors, image_ids
+                )
+                colors = bilgrid_results["rgb"]
 
             if cfg.random_bkgd:
                 bkgd = torch.rand(1, 3, device=device)
@@ -513,7 +520,7 @@ class Runner:
                 ).mean()
                 if step > cfg.normal_consistency_start_iter:
                     loss += normalconsistencyloss * cfg.normal_consistency_lambda
-            
+
             if cfg.bilateral_opt:
                 tvloss = self.bil_grids.tv_loss()
                 loss += 10.0 * tvloss

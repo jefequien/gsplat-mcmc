@@ -37,9 +37,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import tensorly as tl
-tl.set_backend('pytorch')
-from tensorly.decomposition import parafac
 
+tl.set_backend("pytorch")
+from tensorly.decomposition import parafac
 
 
 def color_affine_transform(affine_mats, rgb):
@@ -52,10 +52,14 @@ def color_affine_transform(affine_mats, rgb):
     Returns:
         Output transformed colors of shape $(..., 3)$.
     """
-    return torch.matmul(affine_mats[..., :3], rgb.unsqueeze(-1)).squeeze(-1) + affine_mats[..., 3]
+    return (
+        torch.matmul(affine_mats[..., :3], rgb.unsqueeze(-1)).squeeze(-1)
+        + affine_mats[..., 3]
+    )
 
 
-_num_tensor_elems = lambda t: max(torch.prod(torch.tensor(t.size()[1:]).float()), 1.)
+_num_tensor_elems = lambda t: max(torch.prod(torch.tensor(t.size()[1:]).float()), 1.0)
+
 
 def total_variation_loss(x):
     """Returns total variation on multi-dimensional tensors.
@@ -81,7 +85,7 @@ def slice(bil_grids, xy, rgb, grid_idx):
 
     Supports 2-D, 3-D, and 4-D input shapes. The first dimension of the input is the batch size
     and the last dimension is 2 for `xy`, 3 for `rgb`, and 1 for `grid_idx`.
-    
+
     The return value is a dictionary containing the affine transformations `affine_mats` sliced from bilateral grids and
     the output color `rgb_out` after applying the afffine transformations.
 
@@ -116,26 +120,30 @@ def slice(bil_grids, xy, rgb, grid_idx):
     grid_idx_unique = torch.unique(grid_idx)
     if len(grid_idx_unique) == 1:
         # All pixels are from a single view.
-        grid_idx = grid_idx_unique # (1,)
-        xy = xy.unsqueeze(0) # (1, ..., 2)
-        rgb = rgb.unsqueeze(0) # (1, ..., 3)
+        grid_idx = grid_idx_unique  # (1,)
+        xy = xy.unsqueeze(0)  # (1, ..., 2)
+        rgb = rgb.unsqueeze(0)  # (1, ..., 3)
     else:
         # Pixels are randomly sampled from different views.
         if len(grid_idx.shape) == 4:
-            grid_idx = grid_idx[:, 0, 0, 0] # (chunk_size,)
+            grid_idx = grid_idx[:, 0, 0, 0]  # (chunk_size,)
         elif len(grid_idx.shape) == 3:
-            grid_idx = grid_idx[:, 0, 0] # (chunk_size,)
+            grid_idx = grid_idx[:, 0, 0]  # (chunk_size,)
         elif len(grid_idx.shape) == 2:
-            grid_idx = grid_idx[:, 0] # (chunk_size,)
+            grid_idx = grid_idx[:, 0]  # (chunk_size,)
         else:
-            raise ValueError(f'The input to bilateral grid slicing is not supported yet.')
+            raise ValueError(
+                f"The input to bilateral grid slicing is not supported yet."
+            )
 
     affine_mats = bil_grids(xy, rgb, grid_idx)
     rgb = color_affine_transform(affine_mats, rgb)
 
     return {
-        'rgb': rgb.reshape(*sh_),
-        'rgb_affine_mats': affine_mats.reshape(*sh_[:-1], affine_mats.shape[-2], affine_mats.shape[-1])
+        "rgb": rgb.reshape(*sh_),
+        "rgb_affine_mats": affine_mats.reshape(
+            *sh_[:-1], affine_mats.shape[-2], affine_mats.shape[-1]
+        ),
     }
 
 
@@ -161,27 +169,45 @@ class BilateralGrid(nn.Module):
         """Grid height. Type: int."""
         self.grid_guidance = grid_W
         """Grid guidance dimension. Type: int."""
-        
+
         # Initialize grids.
         grid = self._init_identity_grid()
-        self.grids = nn.Parameter(grid.tile(num, 1, 1, 1, 1)) # (N, 12, L, H, W)
+        self.grids = nn.Parameter(grid.tile(num, 1, 1, 1, 1))  # (N, 12, L, H, W)
         """ A 5-D tensor of shape $(N, 12, L, H, W)$."""
 
         # Weights of BT601 RGB-to-gray.
-        self.register_buffer('rgb2gray_weight', torch.Tensor([[0.299, 0.587, 0.114]]))
-        self.rgb2gray = lambda rgb: (rgb @ self.rgb2gray_weight.T) * 2. - 1.
+        self.register_buffer("rgb2gray_weight", torch.Tensor([[0.299, 0.587, 0.114]]))
+        self.rgb2gray = lambda rgb: (rgb @ self.rgb2gray_weight.T) * 2.0 - 1.0
         """ A function that converts RGB to gray-scale guidance in $[-1, 1]$."""
 
     def _init_identity_grid(self):
-        grid = torch.tensor([1., 0, 0, 0, 0, 1., 0, 0, 0, 0, 1., 0,]).float()
-        grid = grid.repeat([self.grid_guidance * self.grid_height * self.grid_width, 1])  # (L * H * W, 12)
-        grid = grid.reshape(1, self.grid_guidance, self.grid_height, self.grid_width, -1) # (1, L, H, W, 12)
+        grid = torch.tensor(
+            [
+                1.0,
+                0,
+                0,
+                0,
+                0,
+                1.0,
+                0,
+                0,
+                0,
+                0,
+                1.0,
+                0,
+            ]
+        ).float()
+        grid = grid.repeat(
+            [self.grid_guidance * self.grid_height * self.grid_width, 1]
+        )  # (L * H * W, 12)
+        grid = grid.reshape(
+            1, self.grid_guidance, self.grid_height, self.grid_width, -1
+        )  # (1, L, H, W, 12)
         grid = grid.permute(0, 4, 1, 2, 3)  # (1, 12, L, H, W)
         return grid
 
     def tv_loss(self):
-        """Computes and returns total variation loss on the bilateral grids. 
-        """
+        """Computes and returns total variation loss on the bilateral grids."""
         return total_variation_loss(self.grids)
 
     def forward(self, grid_xy, rgb, idx=None):
@@ -211,27 +237,33 @@ class BilateralGrid(nn.Module):
                 rgb = rgb.unsqueeze(1)
             assert idx is not None
         elif input_ndims != 5:
-            raise ValueError('Bilateral grid slicing only takes either 2D, 3D, 4D and 5D inputs')
+            raise ValueError(
+                "Bilateral grid slicing only takes either 2D, 3D, 4D and 5D inputs"
+            )
 
         grids = self.grids
         if idx is not None:
             grids = grids[idx]
         assert grids.shape[0] == grid_xy.shape[0]
-        
-        # Generate slicing coordinates.
-        grid_xy = (grid_xy - 0.5) * 2 # Rescale to [-1, 1].
-        grid_z = self.rgb2gray(rgb)
-        grid_xyz = torch.cat([grid_xy, grid_z], dim=-1) # (N, m, h, w, 3)
 
-        affine_mats = F.grid_sample(grids, grid_xyz, mode='bilinear', align_corners=True, padding_mode='border')  # (N, 12, m, h, w)
+        # Generate slicing coordinates.
+        grid_xy = (grid_xy - 0.5) * 2  # Rescale to [-1, 1].
+        grid_z = self.rgb2gray(rgb)
+        grid_xyz = torch.cat([grid_xy, grid_z], dim=-1)  # (N, m, h, w, 3)
+
+        affine_mats = F.grid_sample(
+            grids, grid_xyz, mode="bilinear", align_corners=True, padding_mode="border"
+        )  # (N, 12, m, h, w)
         affine_mats = affine_mats.permute(0, 2, 3, 4, 1)  # (N, m, h, w, 12)
-        affine_mats = affine_mats.reshape(*affine_mats.shape[:-1], 3, 4)  # (N, m, h, w, 3, 4)
+        affine_mats = affine_mats.reshape(
+            *affine_mats.shape[:-1], 3, 4
+        )  # (N, m, h, w, 3, 4)
 
         for _ in range(5 - input_ndims):
             affine_mats = affine_mats.squeeze(1)
-        
+
         return affine_mats
-    
+
 
 def slice4d(bil_grid4d, xyz, rgb):
     """Slices a 4D bilateral grid by point coordinates `xyz` and gray-scale guidances of radiance colors `rgb`.
@@ -254,35 +286,34 @@ def slice4d(bil_grid4d, xyz, rgb):
     affine_mats = bil_grid4d(xyz, rgb)
     rgb = color_affine_transform(affine_mats, rgb)
 
-    return {
-        'rgb': rgb,
-        'rgb_affine_mats': affine_mats
-    }
+    return {"rgb": rgb, "rgb_affine_mats": affine_mats}
 
 
 class _ScaledTanh(nn.Module):
     def __init__(self, s=2.0):
         super().__init__()
         self.scaler = s
+
     def forward(self, x):
         return torch.tanh(self.scaler * x)
 
 
 class BilateralGridCP4D(nn.Module):
-    """Class for low-rank 4D bilateral grids.
-    """
+    """Class for low-rank 4D bilateral grids."""
 
-    def __init__(self,
-                 grid_X=16,
-                 grid_Y=16,
-                 grid_Z=16,
-                 grid_W=8,
-                 rank=5,
-                 learn_gray=True,
-                 gray_mlp_width=8,
-                 gray_mlp_depth=2,
-                 init_noise_scale=1e-6,
-                 bound=2.):
+    def __init__(
+        self,
+        grid_X=16,
+        grid_Y=16,
+        grid_Z=16,
+        grid_W=8,
+        rank=5,
+        learn_gray=True,
+        gray_mlp_width=8,
+        gray_mlp_depth=2,
+        init_noise_scale=1e-6,
+        bound=2.0,
+    ):
         """
         Args:
             grid_X (int): Defines grid width.
@@ -318,7 +349,7 @@ class BilateralGridCP4D(nn.Module):
         """The noise scale of the initialized factors. Type: float."""
         self.bound = bound
         """The bound of the xyz coordinates. Type: float."""
-        
+
         self._init_cp_factors_parafac()
 
         self.rgb2gray = None
@@ -326,24 +357,51 @@ class BilateralGridCP4D(nn.Module):
         If `learn_gray` is True, this will be an MLP network."""
 
         if self.learn_gray:
-            rgb2gray_mlp_linear = lambda l: nn.Linear(self.gray_mlp_width, self.gray_mlp_width if l < self.gray_mlp_depth - 1 else 1)
+            rgb2gray_mlp_linear = lambda l: nn.Linear(
+                self.gray_mlp_width,
+                self.gray_mlp_width if l < self.gray_mlp_depth - 1 else 1,
+            )
             rgb2gray_mlp_actfn = lambda _: nn.ReLU(inplace=True)
             self.rgb2gray = nn.Sequential(
-                *([nn.Linear(3, self.gray_mlp_width)] + \
-                  [nn_module(l) for l in range(1, self.gray_mlp_depth) for nn_module in [rgb2gray_mlp_actfn, rgb2gray_mlp_linear]] + \
-                  [_ScaledTanh(2.)]))
+                *(
+                    [nn.Linear(3, self.gray_mlp_width)]
+                    + [
+                        nn_module(l)
+                        for l in range(1, self.gray_mlp_depth)
+                        for nn_module in [rgb2gray_mlp_actfn, rgb2gray_mlp_linear]
+                    ]
+                    + [_ScaledTanh(2.0)]
+                )
+            )
         else:
             # Weights of BT601/BT470 RGB-to-gray.
-            self.register_buffer('rgb2gray_weight', torch.Tensor([[0.299, 0.587, 0.114]]))
-            self.rgb2gray = lambda rgb: (rgb @ self.rgb2gray_weight.T) * 2. - 1.
+            self.register_buffer(
+                "rgb2gray_weight", torch.Tensor([[0.299, 0.587, 0.114]])
+            )
+            self.rgb2gray = lambda rgb: (rgb @ self.rgb2gray_weight.T) * 2.0 - 1.0
 
     def _init_identity_grid(self):
-        grid = torch.tensor([1., 0, 0, 0, 0, 1., 0, 0, 0, 0, 1., 0,]).float()
-        grid = grid.repeat([self.grid_W * self.grid_Z * self.grid_Y * self.grid_X, 1]) 
+        grid = torch.tensor(
+            [
+                1.0,
+                0,
+                0,
+                0,
+                0,
+                1.0,
+                0,
+                0,
+                0,
+                0,
+                1.0,
+                0,
+            ]
+        ).float()
+        grid = grid.repeat([self.grid_W * self.grid_Z * self.grid_Y * self.grid_X, 1])
         grid = grid.reshape(self.grid_W, self.grid_Z, self.grid_Y, self.grid_X, -1)
         grid = grid.permute(4, 0, 1, 2, 3)  # (12, grid_W, grid_Z, grid_Y, grid_X)
         return grid
-    
+
     def _init_cp_factors_parafac(self):
         # Initialize identity grids.
         init_grids = self._init_identity_grid()
@@ -355,57 +413,54 @@ class BilateralGridCP4D(nn.Module):
         self.num_facs = len(facs)
 
         self.fac_0 = nn.Linear(facs[0].shape[0], facs[0].shape[1], bias=False)
-        self.fac_0.weight = nn.Parameter(facs[0]) # (12, rank)
+        self.fac_0.weight = nn.Parameter(facs[0])  # (12, rank)
 
         for i in range(1, self.num_facs):
             fac = facs[i].T  # (rank, grid_size)
-            fac = fac.view(1, fac.shape[0], fac.shape[1], 1) # (1, rank, grid_size, 1)
-            self.register_buffer(f'fac_{i}_init', fac)
+            fac = fac.view(1, fac.shape[0], fac.shape[1], 1)  # (1, rank, grid_size, 1)
+            self.register_buffer(f"fac_{i}_init", fac)
 
             fac_resid = torch.zeros_like(fac)
-            self.register_parameter(f'fac_{i}', nn.Parameter(fac_resid))
+            self.register_parameter(f"fac_{i}", nn.Parameter(fac_resid))
 
     def tv_loss(self):
-        """Computes and returns total variation loss on the factors of the low-rank 4D bilateral grids. 
-        """
+        """Computes and returns total variation loss on the factors of the low-rank 4D bilateral grids."""
 
         total_loss = 0
         for i in range(1, self.num_facs):
-            fac = self.get_parameter(f'fac_{i}')
+            fac = self.get_parameter(f"fac_{i}")
             total_loss += total_variation_loss(fac)
-        
+
         return total_loss
 
     def forward(self, xyz, rgb):
         """Low-rank 4D bilateral grid slicing.
-        
+
         Args:
             xyz (torch.Tensor): The xyz coordinates with shape $(..., 3)$.
             rgb (torch.Tensor): The corresponding RGB values with shape $(..., 3)$.
-        
+
         Returns:
             Sliced affine matrices with shape $(..., 3, 4)$.
         """
         sh_ = xyz.shape
-        xyz = xyz.reshape(-1, 3) # flatten (N, 3)
-        rgb = rgb.reshape(-1, 3) # flatten (N, 3)
+        xyz = xyz.reshape(-1, 3)  # flatten (N, 3)
+        rgb = rgb.reshape(-1, 3)  # flatten (N, 3)
 
         xyz = xyz / self.bound
 
         gray = self.rgb2gray(rgb)
-        xyzw = torch.cat([xyz, gray], dim=-1) # (N, 4)
-        xyzw = xyzw.transpose(0, 1) # (4, N)
-        coords = torch.stack([torch.zeros_like(xyzw), xyzw], dim=-1) # (4, N, 2)
-        coords = coords.unsqueeze(1) # (4, 1, N, 2)        
+        xyzw = torch.cat([xyz, gray], dim=-1)  # (N, 4)
+        xyzw = xyzw.transpose(0, 1)  # (4, N)
+        coords = torch.stack([torch.zeros_like(xyzw), xyzw], dim=-1)  # (4, N, 2)
+        coords = coords.unsqueeze(1)  # (4, 1, N, 2)
 
-        coef = 1.
+        coef = 1.0
         for i in range(1, self.num_facs):
-            fac = self.get_parameter(f'fac_{i}') + self.get_buffer(f'fac_{i}_init')
-            coef = coef * F.grid_sample(fac, coords[[i - 1]],
-                                        align_corners=True,
-                                        padding_mode='border') # [1, rank, 1, N]
-        coef = coef.squeeze([0, 2]).transpose(0, 1) # (N, rank)
+            fac = self.get_parameter(f"fac_{i}") + self.get_buffer(f"fac_{i}_init")
+            coef = coef * F.grid_sample(
+                fac, coords[[i - 1]], align_corners=True, padding_mode="border"
+            )  # [1, rank, 1, N]
+        coef = coef.squeeze([0, 2]).transpose(0, 1)  # (N, rank)
         mat = self.fac_0(coef)
         return mat.reshape(*sh_[:-1], 3, 4)
-
-    
