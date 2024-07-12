@@ -17,7 +17,6 @@ from datasets.colmap import Dataset, Parser
 from datasets.traj import (
     generate_interpolated_path,
     generate_ellipse_path_z,
-    generate_ellipse_path_y,
 )
 from torch import Tensor
 from torch.utils.tensorboard import SummaryWriter
@@ -49,6 +48,8 @@ class Config:
     disable_viewer: bool = False
     # Path to the .pt file. If provide, it will skip training and render a video
     ckpt: Optional[str] = None
+    # Render trajectory path strategy.
+    render_traj_path: str = "ellipse"
 
     # Path to the Mip-NeRF 360 dataset
     data_dir: str = "data/360_v2/garden"
@@ -212,7 +213,7 @@ class Runner:
 
         # Tensorboard
         self.writer = SummaryWriter(log_dir=f"{cfg.result_dir}/tb")
-        
+
         self.extconf = {}
         extconf_file = os.path.join(self.cfg.data_dir, "ext_metadata.json")
         if os.path.exists(extconf_file):
@@ -225,7 +226,9 @@ class Runner:
             factor=cfg.data_factor,
             normalize=True,
             test_every=cfg.test_every,
-            no_factor_suffix=self.extconf["no_factor_suffix"] if "no_factor_suffix" in self.extconf else False,
+            no_factor_suffix=self.extconf["no_factor_suffix"]
+            if "no_factor_suffix" in self.extconf
+            else False,
         )
         self.trainset = Dataset(
             self.parser,
@@ -302,7 +305,7 @@ class Runner:
             self.bil_optimizers = [
                 torch.optim.Adam(
                     self.bil_grids.parameters(),
-                    lr=0.001 * math.sqrt(cfg.batch_size),
+                    lr=0.01 * math.sqrt(cfg.batch_size),
                     **adam_kwargs,
                 ),
             ]
@@ -396,7 +399,7 @@ class Runner:
         if cfg.bilateral_opt:
             schedulers.append(
                 torch.optim.lr_scheduler.ExponentialLR(
-                    self.bil_optimizers[0], gamma=0.1 ** (1.0 / max_steps)
+                    self.bil_optimizers[0], gamma=0.01 ** (1.0 / max_steps)
                 )
             )
 
@@ -863,17 +866,16 @@ class Runner:
         device = self.device
 
         camtoworlds_all = self.parser.camtoworlds[5:-5]
-        render_traj_type = "ellipse_z"
-        if render_traj_type == "interp":
+        if cfg.render_traj_path == "interp":
             camtoworlds_all = generate_interpolated_path(
                 camtoworlds_all, 1
             )  # [N, 3, 4]
-        elif render_traj_type == "ellipse_y":
-            camtoworlds_all = generate_ellipse_path_y(camtoworlds_all)  # [N, 3, 4]
-        elif render_traj_type == "ellipse_z":
-            height = camtoworlds_all[:,2,3].mean()
-            camtoworlds_all = generate_ellipse_path_z(camtoworlds_all, height=height)  # [N, 3, 4]
-        elif render_traj_type == "spiral":
+        elif cfg.render_traj_path == "ellipse":
+            height = camtoworlds_all[:, 2, 3].mean()
+            camtoworlds_all = generate_ellipse_path_z(
+                camtoworlds_all, height=height
+            )  # [N, 3, 4]
+        elif cfg.render_traj_path == "spiral":
             posefile = os.path.join(self.cfg.data_dir, "poses_bounds.npy")
             if os.path.exists(posefile):
                 poses_arr = np.load(posefile)
@@ -884,10 +886,12 @@ class Runner:
             camtoworlds_all = generate_spiral_path(
                 camtoworlds_all,
                 bounds,
-                spiral_scale_r=self.extconf["spiral_radius_scale"] if "spiral_radius_scale" in self.extconf else 1.0,
+                spiral_scale_r=self.extconf["spiral_radius_scale"]
+                if "spiral_radius_scale" in self.extconf
+                else 1.0,
             )
         else:
-            raise ValueError(f"Trajectory type not supported: {render_traj_type}")
+            raise ValueError(f"Trajectory type not supported: {cfg.render_traj_path}")
 
         camtoworlds_all = np.concatenate(
             [
