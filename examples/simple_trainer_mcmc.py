@@ -804,7 +804,8 @@ class Runner:
             ellipse_time += time.time() - tic
 
             colors = torch.clamp(renders[..., 0:3], 0.0, 1.0)
-            canvas_list = [pixels, colors]
+            cc_colors = color_correct(colors, pixels)
+            canvas_list = [pixels, colors, cc_colors]
             if cfg.depth_loss:
                 depths = renders[..., -1:]
                 depths = (depths - depths.min()) / (depths.max() - depths.min())
@@ -822,9 +823,6 @@ class Runner:
                 normals_surf = normals_surf * (alphas).detach()
                 canvas_list.extend([normals * 0.5 + 0.5])
                 canvas_list.extend([normals_surf * 0.5 + 0.5])
-
-            cc_colors = color_correct(colors, pixels)
-            canvas_list.append(cc_colors)
 
             # write images
             canvas = torch.cat(canvas_list, dim=2).squeeze(0).cpu().numpy()
