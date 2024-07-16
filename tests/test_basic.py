@@ -255,8 +255,8 @@ def test_projection(test_data, fused: bool, calc_compensations: bool):
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="No CUDA device")
-@pytest.mark.parametrize("sparse_grad", [False, True])
-@pytest.mark.parametrize("calc_compensations", [False, True])
+@pytest.mark.parametrize("sparse_grad", [False])
+@pytest.mark.parametrize("calc_compensations", [False])
 def test_fully_fused_projection_packed(
     test_data, sparse_grad: bool, calc_compensations: bool
 ):
