@@ -245,7 +245,7 @@ def test_projection(test_data, calc_compensations: bool):
 def test_fully_fused_projection_packed(
     test_data, sparse_grad: bool, calc_compensations: bool
 ):
-    from gsplat.cuda._wrapper import fully_fused_projection, quat_scale_to_covar_preci
+    from gsplat.cuda._wrapper import fully_fused_projection
 
     torch.manual_seed(42)
 
