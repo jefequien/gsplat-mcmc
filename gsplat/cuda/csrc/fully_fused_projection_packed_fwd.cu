@@ -36,7 +36,7 @@ __global__ void fully_fused_projection_packed_fwd_kernel(
     int32_t *__restrict__ radii,        // [nnz]
     T *__restrict__ means2d,        // [nnz, 2]
     T *__restrict__ depths,         // [nnz]
-    T *__restrict__ normals,         // [nnz, 3]
+    T *__restrict__ normals,        // [nnz, 3]
     T *__restrict__ conics,         // [nnz, 3]
     T *__restrict__ compensations   // [nnz] optional
 ) {

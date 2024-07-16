@@ -155,7 +155,7 @@ __global__ void fully_fused_projection_bwd_kernel(
 
         v_normals += idx * 3;
         quat_scale_to_covar_normal_vjp<T>(quat, scale, rotmat, v_covar, glm::make_vec3(v_normals), v_quat, v_scale);
-        
+
         warpSum(v_quat, warp_group_g);
         warpSum(v_scale, warp_group_g);
         if (warp_group_g.thread_rank() == 0) {

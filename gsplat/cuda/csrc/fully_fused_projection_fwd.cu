@@ -136,6 +136,7 @@ fully_fused_projection_fwd_kernel(const uint32_t C, const uint32_t N,
     }
 }
 
+
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 fully_fused_projection_fwd_tensor(
     const torch::Tensor &means,                // [N, 3]
