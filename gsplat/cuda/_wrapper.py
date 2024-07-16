@@ -738,7 +738,9 @@ class _FullyFusedProjection(torch.autograd.Function):
         return radii, means2d, depths, normals, conics, compensations
 
     @staticmethod
-    def backward(ctx, v_radii, v_means2d, v_depths, v_normals, v_conics, v_compensations):
+    def backward(
+        ctx, v_radii, v_means2d, v_depths, v_normals, v_conics, v_compensations
+    ):
         (
             means,
             covars,
@@ -993,7 +995,16 @@ class _FullyFusedProjectionPacked(torch.autograd.Function):
         ctx.eps2d = eps2d
         ctx.sparse_grad = sparse_grad
 
-        return camera_ids, gaussian_ids, radii, means2d, depths, normals, conics, compensations
+        return (
+            camera_ids,
+            gaussian_ids,
+            radii,
+            means2d,
+            depths,
+            normals,
+            conics,
+            compensations,
+        )
 
     @staticmethod
     def backward(

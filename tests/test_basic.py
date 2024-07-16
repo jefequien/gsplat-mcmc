@@ -159,9 +159,8 @@ def test_persp_proj(test_data):
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="No CUDA device")
-@pytest.mark.parametrize("fused", [False, True])
 @pytest.mark.parametrize("calc_compensations", [False, True])
-def test_projection(test_data, fused: bool, calc_compensations: bool):
+def test_projection(test_data, calc_compensations: bool):
     from gsplat.cuda._torch_impl import _fully_fused_projection
     from gsplat.cuda._wrapper import fully_fused_projection, quat_scale_to_covar_preci
 
@@ -180,31 +179,17 @@ def test_projection(test_data, fused: bool, calc_compensations: bool):
     means.requires_grad = True
 
     # forward
-    if fused:
-        radii, means2d, depths, conics, compensations = fully_fused_projection(
-            means,
-            None,
-            quats,
-            scales,
-            viewmats,
-            Ks,
-            width,
-            height,
-            calc_compensations=calc_compensations,
-        )
-    else:
-        covars, _ = quat_scale_to_covar_preci(quats, scales, triu=True)  # [N, 6]
-        radii, means2d, depths, conics, compensations = fully_fused_projection(
-            means,
-            covars,
-            None,
-            None,
-            viewmats,
-            Ks,
-            width,
-            height,
-            calc_compensations=calc_compensations,
-        )
+    radii, means2d, depths, normals, conics, compensations = fully_fused_projection(
+        means,
+        None,
+        quats,
+        scales,
+        viewmats,
+        Ks,
+        width,
+        height,
+        calc_compensations=calc_compensations,
+    )
     _covars, _ = quat_scale_to_covar_preci(quats, scales, triu=False)  # [N, 3, 3]
     _radii, _means2d, _depths, _conics, _compensations = _fully_fused_projection(
         means,
@@ -255,8 +240,8 @@ def test_projection(test_data, fused: bool, calc_compensations: bool):
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="No CUDA device")
-@pytest.mark.parametrize("sparse_grad", [False])
-@pytest.mark.parametrize("calc_compensations", [False])
+@pytest.mark.parametrize("sparse_grad", [False, True])
+@pytest.mark.parametrize("calc_compensations", [False, True])
 def test_fully_fused_projection_packed(
     test_data, sparse_grad: bool, calc_compensations: bool
 ):
@@ -264,8 +249,8 @@ def test_fully_fused_projection_packed(
 
     torch.manual_seed(42)
 
-    Ks = test_data["Ks"][2:3]
-    viewmats = test_data["viewmats"][2:3]
+    Ks = test_data["Ks"]
+    viewmats = test_data["viewmats"]
     height = test_data["height"]
     width = test_data["width"]
     quats = test_data["quats"]
@@ -299,7 +284,14 @@ def test_fully_fused_projection_packed(
         sparse_grad=sparse_grad,
         calc_compensations=calc_compensations,
     )
-    _radii, _means2d, _depths, _normals, _conics, _compensations = fully_fused_projection(
+    (
+        _radii,
+        _means2d,
+        _depths,
+        _normals,
+        _conics,
+        _compensations,
+    ) = fully_fused_projection(
         means,
         None,
         quats,
@@ -356,7 +348,6 @@ def test_fully_fused_projection_packed(
         (viewmats, quats, scales, means),
         retain_graph=True,
     )
-    print(normals.shape, v_normals[sel].shape, v_normals.shape)
     v_viewmats, v_quats, v_scales, v_means = torch.autograd.grad(
         (means2d * v_means2d[sel]).sum()
         + (depths * v_depths[sel]).sum()
@@ -436,11 +427,9 @@ def test_rasterize_to_pixels(test_data, channels: int):
     colors = torch.randn(C, len(means), channels, device=device)
     backgrounds = torch.rand((C, colors.shape[-1]), device=device)
 
-    covars, _ = quat_scale_to_covar_preci(quats, scales, compute_preci=False, triu=True)
-
     # Project Gaussians to 2D
-    radii, means2d, depths, conics, compensations = fully_fused_projection(
-        means, covars, None, None, viewmats, Ks, width, height
+    radii, means2d, depths, normals, conics, compensations = fully_fused_projection(
+        means, None, quats, scales, viewmats, Ks, width, height
     )
     opacities = opacities.repeat(C, 1)
 
