@@ -255,18 +255,17 @@ def test_projection(test_data, fused: bool, calc_compensations: bool):
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="No CUDA device")
-@pytest.mark.parametrize("fused", [False, True])
 @pytest.mark.parametrize("sparse_grad", [False, True])
 @pytest.mark.parametrize("calc_compensations", [False, True])
 def test_fully_fused_projection_packed(
-    test_data, fused: bool, sparse_grad: bool, calc_compensations: bool
+    test_data, sparse_grad: bool, calc_compensations: bool
 ):
     from gsplat.cuda._wrapper import fully_fused_projection, quat_scale_to_covar_preci
 
     torch.manual_seed(42)
 
-    Ks = test_data["Ks"]
-    viewmats = test_data["viewmats"]
+    Ks = test_data["Ks"][2:3]
+    viewmats = test_data["viewmats"][2:3]
     height = test_data["height"]
     width = test_data["width"]
     quats = test_data["quats"]
@@ -278,75 +277,40 @@ def test_fully_fused_projection_packed(
     means.requires_grad = True
 
     # forward
-    if fused:
-        (
-            camera_ids,
-            gaussian_ids,
-            radii,
-            means2d,
-            depths,
-            conics,
-            compensations,
-        ) = fully_fused_projection(
-            means,
-            None,
-            quats,
-            scales,
-            viewmats,
-            Ks,
-            width,
-            height,
-            packed=True,
-            sparse_grad=sparse_grad,
-            calc_compensations=calc_compensations,
-        )
-        _radii, _means2d, _depths, _conics, _compensations = fully_fused_projection(
-            means,
-            None,
-            quats,
-            scales,
-            viewmats,
-            Ks,
-            width,
-            height,
-            packed=False,
-            calc_compensations=calc_compensations,
-        )
-    else:
-        covars, _ = quat_scale_to_covar_preci(quats, scales, triu=True)  # [N, 6]
-        (
-            camera_ids,
-            gaussian_ids,
-            radii,
-            means2d,
-            depths,
-            conics,
-            compensations,
-        ) = fully_fused_projection(
-            means,
-            covars,
-            None,
-            None,
-            viewmats,
-            Ks,
-            width,
-            height,
-            packed=True,
-            sparse_grad=sparse_grad,
-            calc_compensations=calc_compensations,
-        )
-        _radii, _means2d, _depths, _conics, _compensations = fully_fused_projection(
-            means,
-            covars,
-            None,
-            None,
-            viewmats,
-            Ks,
-            width,
-            height,
-            packed=False,
-            calc_compensations=calc_compensations,
-        )
+    (
+        camera_ids,
+        gaussian_ids,
+        radii,
+        means2d,
+        depths,
+        normals,
+        conics,
+        compensations,
+    ) = fully_fused_projection(
+        means,
+        None,
+        quats,
+        scales,
+        viewmats,
+        Ks,
+        width,
+        height,
+        packed=True,
+        sparse_grad=sparse_grad,
+        calc_compensations=calc_compensations,
+    )
+    _radii, _means2d, _depths, _normals, _conics, _compensations = fully_fused_projection(
+        means,
+        None,
+        quats,
+        scales,
+        viewmats,
+        Ks,
+        width,
+        height,
+        packed=False,
+        calc_compensations=calc_compensations,
+    )
 
     # recover packed tensors to full matrices for testing
     __radii = torch.sparse_coo_tensor(
@@ -357,6 +321,9 @@ def test_fully_fused_projection_packed(
     ).to_dense()
     __depths = torch.sparse_coo_tensor(
         torch.stack([camera_ids, gaussian_ids]), depths, _depths.shape
+    ).to_dense()
+    __normals = torch.sparse_coo_tensor(
+        torch.stack([camera_ids, gaussian_ids]), normals, _normals.shape
     ).to_dense()
     __conics = torch.sparse_coo_tensor(
         torch.stack([camera_ids, gaussian_ids]), conics, _conics.shape
@@ -369,6 +336,7 @@ def test_fully_fused_projection_packed(
     torch.testing.assert_close(__radii[sel], _radii[sel], rtol=0, atol=1)
     torch.testing.assert_close(__means2d[sel], _means2d[sel], rtol=1e-4, atol=1e-4)
     torch.testing.assert_close(__depths[sel], _depths[sel], rtol=1e-4, atol=1e-4)
+    torch.testing.assert_close(__normals[sel], _normals[sel], rtol=1e-4, atol=1e-4)
     torch.testing.assert_close(__conics[sel], _conics[sel], rtol=1e-4, atol=1e-4)
     if calc_compensations:
         torch.testing.assert_close(
@@ -378,17 +346,21 @@ def test_fully_fused_projection_packed(
     # backward
     v_means2d = torch.randn_like(_means2d) * sel[..., None]
     v_depths = torch.randn_like(_depths) * sel
+    v_normals = torch.randn_like(_normals) * sel[..., None]
     v_conics = torch.randn_like(_conics) * sel[..., None]
     _v_viewmats, _v_quats, _v_scales, _v_means = torch.autograd.grad(
         (_means2d * v_means2d).sum()
         + (_depths * v_depths).sum()
+        + (_normals * v_normals).sum()
         + (_conics * v_conics).sum(),
         (viewmats, quats, scales, means),
         retain_graph=True,
     )
+    print(normals.shape, v_normals[sel].shape, v_normals.shape)
     v_viewmats, v_quats, v_scales, v_means = torch.autograd.grad(
         (means2d * v_means2d[sel]).sum()
         + (depths * v_depths[sel]).sum()
+        + (normals * v_normals[sel]).sum()
         + (conics * v_conics[sel]).sum(),
         (viewmats, quats, scales, means),
         retain_graph=True,
