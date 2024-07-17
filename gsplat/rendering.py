@@ -13,6 +13,8 @@ from .cuda._wrapper import (
     rasterize_to_pixels,
     spherical_harmonics,
 )
+from .utils.normal_utils import depth_to_normal
+from .utils.camera_utils import getProjectionMatrix
 
 
 def rasterization(
@@ -33,7 +35,7 @@ def rasterization(
     packed: bool = True,
     tile_size: int = 16,
     backgrounds: Optional[Tensor] = None,
-    render_mode: Literal["RGB", "D", "ED", "RGB+D", "RGB+ED"] = "RGB",
+    render_mode: Literal["RGB", "D", "ED", "RGB+D", "RGB+ED", "RGB+ED+N"] = "RGB",
     sparse_grad: bool = False,
     absgrad: bool = False,
     rasterize_mode: Literal["classic", "antialiased"] = "classic",
@@ -198,7 +200,7 @@ def rasterization(
     assert opacities.shape == (N,), opacities.shape
     assert viewmats.shape == (C, 4, 4), viewmats.shape
     assert Ks.shape == (C, 3, 3), Ks.shape
-    assert render_mode in ["RGB", "D", "ED", "RGB+D", "RGB+ED"], render_mode
+    assert render_mode in ["RGB", "D", "ED", "RGB+D", "RGB+ED", "RGB+ED+N"], render_mode
 
     if sh_degree is None:
         # treat colors as post-activation values, should be in shape [N, D] or [C, N, D]
@@ -242,6 +244,7 @@ def rasterization(
             radii,
             means2d,
             depths,
+            normals,
             conics,
             compensations,
         ) = proj_results
@@ -317,7 +320,7 @@ def rasterization(
 
     # Rasterize to pixels
     if render_mode in ["RGB+D", "RGB+ED"]:
-        colors = torch.cat((colors, normals, depths[..., None]), dim=-1)
+        colors = torch.cat((colors, depths[..., None]), dim=-1)
         if backgrounds is not None:
             backgrounds = torch.cat(
                 [backgrounds, torch.zeros(C, 1, device=backgrounds.device)], dim=-1
@@ -326,6 +329,12 @@ def rasterization(
         colors = depths[..., None]
         if backgrounds is not None:
             backgrounds = torch.zeros(C, 1, device=backgrounds.device)
+    elif render_mode in ["RGB+ED+N"]:
+        colors = torch.cat((colors, normals, depths[..., None]), dim=-1)
+        if backgrounds is not None:
+            backgrounds = torch.cat(
+                [backgrounds, torch.zeros(C, 1, device=backgrounds.device)], dim=-1
+            )
     else:  # RGB
         pass
     if colors.shape[-1] > channel_chunk:
@@ -372,16 +381,6 @@ def rasterization(
             packed=packed,
             absgrad=absgrad,
         )
-    if render_mode in ["ED", "RGB+ED"]:
-        # normalize the accumulated depth to get the expected depth
-        render_colors = torch.cat(
-            [
-                render_colors[..., :3],
-                render_colors[..., -4:-1],
-                render_colors[..., -1:] / render_alphas.clamp(min=1e-10),
-            ],
-            dim=-1,
-        )
 
     meta = {
         "camera_ids": camera_ids,
@@ -401,6 +400,25 @@ def rasterization(
         "height": height,
         "tile_size": tile_size,
     }
+    if render_mode in ["ED", "RGB+ED", "RGB+ED+N"]:
+        # normalize the accumulated depth to get the expected depth
+        render_colors[..., -1:] /= render_alphas.clamp(min=1e-10)
+    if render_mode in ["RGB+ED+N"]:
+        normals_rend = render_colors[..., -4:-1]
+        normals_surf = depth_to_normal(
+            render_colors[..., -1:],
+            viewmats,
+            Ks,
+            near_plane=near_plane,
+            far_plane=far_plane,
+        )
+        normals_surf = normals_surf * (render_alphas).detach()
+        meta.update(
+            {
+                "normals_rend": normals_rend,
+                "normals_surf": normals_surf,
+            }
+        )
     return render_colors, render_alphas, meta
 
 
@@ -528,28 +546,6 @@ def rasterization_inria_wrapper(
         GaussianRasterizer,
     )
 
-    def _getProjectionMatrix(znear, zfar, fovX, fovY, device="cuda"):
-        tanHalfFovY = math.tan((fovY / 2))
-        tanHalfFovX = math.tan((fovX / 2))
-
-        top = tanHalfFovY * znear
-        bottom = -top
-        right = tanHalfFovX * znear
-        left = -right
-
-        P = torch.zeros(4, 4, device=device)
-
-        z_sign = 1.0
-
-        P[0, 0] = 2.0 * znear / (right - left)
-        P[1, 1] = 2.0 * znear / (top - bottom)
-        P[0, 2] = (right + left) / (right - left)
-        P[1, 2] = (top + bottom) / (top - bottom)
-        P[3, 2] = z_sign
-        P[2, 2] = z_sign * zfar / (zfar - znear)
-        P[2, 3] = -(zfar * znear) / (zfar - znear)
-        return P
-
     assert eps2d == 0.3, "This is hard-coded in CUDA to be 0.3"
     C = len(viewmats)
     device = means.device
@@ -566,7 +562,7 @@ def rasterization_inria_wrapper(
         tanfovy = math.tan(FoVy * 0.5)
 
         world_view_transform = viewmats[cid].transpose(0, 1)
-        projection_matrix = _getProjectionMatrix(
+        projection_matrix = getProjectionMatrix(
             znear=near_plane, zfar=far_plane, fovX=FoVx, fovY=FoVy, device=device
         ).transpose(0, 1)
         full_proj_transform = (
@@ -656,28 +652,6 @@ def rasterization_2dgs_inria_wrapper(
         GaussianRasterizer,
     )
 
-    def _getProjectionMatrix(znear, zfar, fovX, fovY, device="cuda"):
-        tanHalfFovY = math.tan((fovY / 2))
-        tanHalfFovX = math.tan((fovX / 2))
-
-        top = tanHalfFovY * znear
-        bottom = -top
-        right = tanHalfFovX * znear
-        left = -right
-
-        P = torch.zeros(4, 4, device=device)
-
-        z_sign = 1.0
-
-        P[0, 0] = 2.0 * znear / (right - left)
-        P[1, 1] = 2.0 * znear / (top - bottom)
-        P[0, 2] = (right + left) / (right - left)
-        P[1, 2] = (top + bottom) / (top - bottom)
-        P[3, 2] = z_sign
-        P[2, 2] = z_sign * zfar / (zfar - znear)
-        P[2, 3] = -(zfar * znear) / (zfar - znear)
-        return P
-
     assert eps2d == 0.3, "This is hard-coded in CUDA to be 0.3"
     C = len(viewmats)
     device = means.device
@@ -695,7 +669,7 @@ def rasterization_2dgs_inria_wrapper(
         tanfovy = math.tan(FoVy * 0.5)
 
         world_view_transform = viewmats[cid].transpose(0, 1)
-        projection_matrix = _getProjectionMatrix(
+        projection_matrix = getProjectionMatrix(
             znear=near_plane, zfar=far_plane, fovX=FoVx, fovY=FoVy, device=device
         ).transpose(0, 1)
         full_proj_transform = (
@@ -776,6 +750,19 @@ def rasterization_2dgs_inria_wrapper(
         render_depth_expected * (1 - depth_ratio) + (depth_ratio) * render_depth_median
     )
 
-    meta = {"render_distloss": render_dist}
-    render_colors = torch.cat([render_colors, render_normal, render_depth], dim=-1)
+    normals_surf = depth_to_normal(
+        render_depth,
+        viewmats,
+        Ks,
+        near_plane=near_plane,
+        far_plane=far_plane,
+    )
+    normals_surf = normals_surf * (render_alphas).detach()
+
+    render_colors = torch.cat([render_colors, render_depth], dim=-1)
+    meta = {
+        "normals_rend": render_normal,
+        "normals_surf": normals_surf,
+        "render_distloss": render_dist,
+    }
     return render_colors, render_alphas, meta
