@@ -285,18 +285,16 @@ class Runner:
                     lr=cfg.app_opt_lr * math.sqrt(cfg.batch_size),
                 ),
             ]
+
         self.exp_optimizers = []
         if cfg.exp_opt:
             self.exp_grids = BilateralGrid(len(self.trainset)).to(self.device)
-            adam_kwargs = {
-                "betas": [0.9, 0.99],
-                "eps": 1e-15,
-            }
             self.exp_optimizers = [
                 torch.optim.Adam(
                     self.exp_grids.parameters(),
                     lr=0.001 * math.sqrt(cfg.batch_size),
-                    **adam_kwargs,
+                    betas=[0.9, 0.99],
+                    eps=1e-15,
                 ),
             ]
 

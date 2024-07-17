@@ -132,7 +132,7 @@ class Parser:
         camtoworlds = camtoworlds[inds]
         camera_ids = [camera_ids[i] for i in inds]
 
-        # Load extended config
+        # Load extended metadata. Used by Bilarf dataset.
         self.extconf = {
             "spiral_radius_scale": 1.0,
             "no_factor_suffix": False,
@@ -142,7 +142,7 @@ class Parser:
             with open(extconf_file) as f:
                 self.extconf.update(json.load(f))
 
-        # Load bounds
+        # Load bounds if possible (only used in forward facing scenes).
         self.bounds = np.array([0.01, 1.0])
         posefile = os.path.join(data_dir, "poses_bounds.npy")
         if os.path.exists(posefile):
