@@ -1,5 +1,6 @@
 #include "bindings.h"
 #include "helpers.cuh"
+#include "types.cuh"
 #include <cooperative_groups.h>
 #include <cub/cub.cuh>
 #include <cuda_runtime.h>
@@ -13,11 +14,11 @@ namespace cg = cooperative_groups;
 template <uint32_t COLOR_DIM, typename S>
 __global__ void rasterize_to_pixels_fwd_kernel(
     const uint32_t C, const uint32_t N, const uint32_t n_isects, const bool packed,
-    const typename Float2<S>::type *__restrict__ means2d,    // [C, N, 2] or [nnz, 2]
-    const typename Float3<S>::type *__restrict__ conics,     // [C, N, 3] or [nnz, 3]
-    const S *__restrict__ colors,      // [C, N, COLOR_DIM] or [nnz, COLOR_DIM]
-    const S *__restrict__ opacities,   // [C, N] or [nnz]
-    const S *__restrict__ backgrounds, // [C, COLOR_DIM]
+    const vec2<S> *__restrict__ means2d, // [C, N, 2] or [nnz, 2]
+    const vec3<S> *__restrict__ conics,  // [C, N, 3] or [nnz, 3]
+    const S *__restrict__ colors,        // [C, N, COLOR_DIM] or [nnz, COLOR_DIM]
+    const S *__restrict__ opacities,     // [C, N] or [nnz]
+    const S *__restrict__ backgrounds,   // [C, COLOR_DIM]
     const uint32_t image_width, const uint32_t image_height, const uint32_t tile_size,
     const uint32_t tile_width, const uint32_t tile_height,
     const int32_t *__restrict__ tile_offsets, // [C, tile_height, tile_width]
@@ -66,9 +67,11 @@ __global__ void rasterize_to_pixels_fwd_kernel(
     uint32_t num_batches = (range_end - range_start + block_size - 1) / block_size;
 
     extern __shared__ int s[];
-    int32_t *id_batch = (int32_t *)s;                              // [block_size]
-    typename Float3<S>::type *xy_opacity_batch = (typename Float3<S>::type *)&id_batch[block_size];    // [block_size]
-    typename Float3<S>::type *conic_batch = (typename Float3<S>::type *)&xy_opacity_batch[block_size]; // [block_size]
+    int32_t *id_batch = (int32_t *)s; // [block_size]
+    vec3<S> *xy_opacity_batch =
+        reinterpret_cast<vec3<float> *>(&id_batch[block_size]); // [block_size]
+    vec3<S> *conic_batch =
+        reinterpret_cast<vec3<float> *>(&xy_opacity_batch[block_size]); // [block_size]
 
     // current visibility left to render
     // transmittance is gonna be used in the backward pass which requires a high
@@ -106,7 +109,7 @@ __global__ void rasterize_to_pixels_fwd_kernel(
         if (idx < range_end) {
             int32_t g = flatten_ids[idx]; // flatten index in [C * N] or [nnz]
             id_batch[tr] = g;
-            const typename Float2<S>::type xy = means2d[g];
+            const vec2<S> xy = means2d[g];
             const S opac = opacities[g];
             xy_opacity_batch[tr] = {xy.x, xy.y, opac};
             conic_batch[tr] = conics[g];
@@ -118,10 +121,10 @@ __global__ void rasterize_to_pixels_fwd_kernel(
         // process gaussians in the current batch for this pixel
         uint32_t batch_size = min(block_size, range_end - batch_start);
         for (uint32_t t = 0; (t < batch_size) && !done; ++t) {
-            const typename Float3<S>::type conic = conic_batch[t];
-            const typename Float3<S>::type xy_opac = xy_opacity_batch[t];
+            const vec3<S> conic = conic_batch[t];
+            const vec3<S> xy_opac = xy_opacity_batch[t];
             const S opac = xy_opac.z;
-            const typename Float2<S>::type delta = {xy_opac.x - px, xy_opac.y - py};
+            const vec2<S> delta = {xy_opac.x - px, xy_opac.y - py};
             const S sigma =
                 0.5f * (conic.x * delta.x * delta.x + conic.z * delta.y * delta.y) +
                 conic.y * delta.x * delta.y;
@@ -245,16 +248,17 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> call_kern
 
     at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
     const uint32_t shared_mem =
-        tile_size * tile_size * (sizeof(int32_t) + sizeof(float3) + sizeof(float3));
+        tile_size * tile_size *
+        (sizeof(int32_t) + sizeof(vec3<float>) + sizeof(vec3<float>));
 
     // TODO: an optimization can be done by passing the actual number of channels into
     // the kernel functions and avoid necessary global memory writes. This requires
     // moving the channel padding from python to C side.
     if (cudaFuncSetAttribute(rasterize_to_pixels_fwd_kernel<CDIM, float>,
-                                cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                shared_mem) != cudaSuccess) {
+                             cudaFuncAttributeMaxDynamicSharedMemorySize,
+                             shared_mem) != cudaSuccess) {
         AT_ERROR("Failed to set maximum shared memory size (requested ", shared_mem,
-                    " bytes), try lowering tile_size.");
+                 " bytes), try lowering tile_size.");
     }
     rasterize_to_pixels_fwd_kernel<CDIM, float><<<blocks, threads, shared_mem, stream>>>(
         C, N, n_isects, packed, (float2 *)means2d.data_ptr<float>(),
@@ -268,8 +272,6 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> call_kern
  
     return std::make_tuple(renders, alphas, distortions, last_ids);
 }
-
-
 
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
@@ -289,11 +291,11 @@ rasterize_to_pixels_fwd_tensor(
     CHECK_INPUT(colors);
     uint32_t channels = colors.size(-1);
 
-    #define __GS__CALL_(N) case N: \
-        return call_kernel_with_dim<N>( \
-            means2d, conics, colors, opacities, \
-            backgrounds, image_width, image_height, \
-            tile_size, tile_offsets, flatten_ids);
+#define __GS__CALL_(N)                                                                 \
+    case N:                                                                            \
+        return call_kernel_with_dim<N>(means2d, conics, colors, opacities,             \
+                                       backgrounds, image_width, image_height,         \
+                                       tile_size, tile_offsets, flatten_ids);
 
     // TODO: an optimization can be done by passing the actual number of channels into
     // the kernel functions and avoid necessary global memory writes. This requires

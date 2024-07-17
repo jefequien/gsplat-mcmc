@@ -1,11 +1,11 @@
 #include "bindings.h"
 #include "helpers.cuh"
+#include "types.cuh"
 #include <cooperative_groups.h>
 #include <cub/cub.cuh>
 #include <cuda_runtime.h>
 
 namespace cg = cooperative_groups;
-
 
 /****************************************************************************
  * Rasterization to Pixels Backward Pass
@@ -15,11 +15,11 @@ template <uint32_t COLOR_DIM, typename S>
 __global__ void rasterize_to_pixels_bwd_kernel(
     const uint32_t C, const uint32_t N, const uint32_t n_isects, const bool packed,
     // fwd inputs
-    const typename Float2<S>::type *__restrict__ means2d,    // [C, N, 2] or [nnz, 2]
-    const typename Float3<S>::type *__restrict__ conics,     // [C, N, 3] or [nnz, 3]
-    const S *__restrict__ colors,      // [C, N, COLOR_DIM] or [nnz, COLOR_DIM]
-    const S *__restrict__ opacities,   // [C, N] or [nnz]
-    const S *__restrict__ backgrounds, // [C, COLOR_DIM] or [nnz, COLOR_DIM]
+    const vec2<S> *__restrict__ means2d, // [C, N, 2] or [nnz, 2]
+    const vec3<S> *__restrict__ conics,  // [C, N, 3] or [nnz, 3]
+    const S *__restrict__ colors,        // [C, N, COLOR_DIM] or [nnz, COLOR_DIM]
+    const S *__restrict__ opacities,     // [C, N] or [nnz]
+    const S *__restrict__ backgrounds,   // [C, COLOR_DIM] or [nnz, COLOR_DIM]
     const uint32_t image_width, const uint32_t image_height, const uint32_t tile_size,
     const uint32_t tile_width, const uint32_t tile_height,
     const int32_t *__restrict__ tile_offsets, // [C, tile_height, tile_width]
@@ -30,16 +30,16 @@ __global__ void rasterize_to_pixels_bwd_kernel(
     const S *__restrict__ render_distortions, // [C, image_height, image_width, 1]
     const int32_t *__restrict__ last_ids,    // [C, image_height, image_width]
     // grad outputs
-    const S
-        *__restrict__ v_render_colors, // [C, image_height, image_width, COLOR_DIM]
+    const S *__restrict__ v_render_colors, // [C, image_height, image_width,
+                                           // COLOR_DIM]
     const S *__restrict__ v_render_alphas, // [C, image_height, image_width, 1]
     const S *__restrict__ v_render_distortions, // [C, image_height, image_width, 1]
     // grad inputs
-    typename Float2<S>::type *__restrict__ v_means2d_abs, // [C, N, 2] or [nnz, 2]
-    typename Float2<S>::type *__restrict__ v_means2d,     // [C, N, 2] or [nnz, 2]
-    typename Float3<S>::type *__restrict__ v_conics,      // [C, N, 3] or [nnz, 3]
-    S *__restrict__ v_colors,       // [C, N, COLOR_DIM] or [nnz, COLOR_DIM]
-    S *__restrict__ v_opacities     // [C, N] or [nnz]
+    vec2<S> *__restrict__ v_means2d_abs, // [C, N, 2] or [nnz, 2]
+    vec2<S> *__restrict__ v_means2d,     // [C, N, 2] or [nnz, 2]
+    vec3<S> *__restrict__ v_conics,      // [C, N, 3] or [nnz, 3]
+    S *__restrict__ v_colors,            // [C, N, COLOR_DIM] or [nnz, COLOR_DIM]
+    S *__restrict__ v_opacities          // [C, N] or [nnz]
 ) {
     auto block = cg::this_thread_block();
     uint32_t camera_id = block.group_index().x;
@@ -80,9 +80,11 @@ __global__ void rasterize_to_pixels_bwd_kernel(
         (range_end - range_start + block_size - 1) / block_size;
 
     extern __shared__ int s[];
-    int32_t *id_batch = (int32_t *)s;                              // [block_size]
-    typename Float3<S>::type *xy_opacity_batch = (typename Float3<S>::type *)&id_batch[block_size];    // [block_size]
-    typename Float3<S>::type *conic_batch = (typename Float3<S>::type *)&xy_opacity_batch[block_size]; // [block_size]
+    int32_t *id_batch = (int32_t *)s; // [block_size]
+    vec3<S> *xy_opacity_batch =
+        reinterpret_cast<vec3<float> *>(&id_batch[block_size]); // [block_size]
+    vec3<S> *conic_batch =
+        reinterpret_cast<vec3<float> *>(&xy_opacity_batch[block_size]); // [block_size]
     S *rgbs_batch = (S *)&conic_batch[block_size]; // [block_size * COLOR_DIM]
 
     // this is the T AFTER the last gaussian in this pixel
@@ -142,7 +144,7 @@ __global__ void rasterize_to_pixels_bwd_kernel(
         if (idx >= range_start) {
             int32_t g = flatten_ids[idx]; // flatten index in [C * N] or [nnz]
             id_batch[tr] = g;
-            const typename Float2<S>::type xy = means2d[g];
+            const vec2<S> xy = means2d[g];
             const S opac = opacities[g];
             xy_opacity_batch[tr] = {xy.x, xy.y, opac};
             conic_batch[tr] = conics[g];
@@ -162,14 +164,14 @@ __global__ void rasterize_to_pixels_bwd_kernel(
             }
             S alpha;
             S opac;
-            typename Float2<S>::type delta;
-            typename Float3<S>::type conic;
+            vec2<S> delta;
+            vec3<S> conic;
             S vis;
             S depth;
 
             if (valid) {
                 conic = conic_batch[t];
-                typename Float3<S>::type xy_opac = xy_opacity_batch[t];
+                vec3<S> xy_opac = xy_opacity_batch[t];
                 opac = xy_opac.z;
                 delta = {xy_opac.x - px, xy_opac.y - py};
                 S sigma =
@@ -192,9 +194,9 @@ __global__ void rasterize_to_pixels_bwd_kernel(
                 continue;
             }
             S v_rgb_local[COLOR_DIM] = {0.f};
-            typename Float3<S>::type v_conic_local = {0.f, 0.f, 0.f};
-            typename Float2<S>::type v_xy_local = {0.f, 0.f};
-            typename Float2<S>::type v_xy_abs_local = {0.f, 0.f};
+            vec3<S> v_conic_local = {0.f, 0.f, 0.f};
+            vec2<S> v_xy_local = {0.f, 0.f};
+            vec2<S> v_xy_abs_local = {0.f, 0.f};
             S v_opacity_local = 0.f;
             // initialize everything to 0, only set if the lane is valid
             if (valid) {
@@ -305,11 +307,9 @@ __global__ void rasterize_to_pixels_bwd_kernel(
     }
 }
 
-
-
-
 template <uint32_t CDIM>
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> call_kernel_with_dim(
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+call_kernel_with_dim(
     // Gaussian parameters
     const torch::Tensor &means2d,                   // [C, N, 2] or [nnz, 2]
     const torch::Tensor &conics,                    // [C, N, 3] or [nnz, 3]
@@ -332,7 +332,6 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     const torch::Tensor &v_render_distortions, // [C, image_height, image_width, 1]
     // options
     bool absgrad) {
-
 
     DEVICE_GUARD(means2d);
     CHECK_INPUT(means2d);
@@ -377,15 +376,15 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 
     if (n_isects) {
         const uint32_t shared_mem = tile_size * tile_size *
-                                    (sizeof(int32_t) + sizeof(float3) + sizeof(float3) +
-                                     sizeof(float) * COLOR_DIM);
+                                    (sizeof(int32_t) + sizeof(vec3<float>) +
+                                     sizeof(vec3<float>) + sizeof(float) * COLOR_DIM);
         at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
 
         if (cudaFuncSetAttribute(rasterize_to_pixels_bwd_kernel<CDIM, float>,
-                                    cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                    shared_mem) != cudaSuccess) {
-            AT_ERROR("Failed to set maximum shared memory size (requested ",
-                     shared_mem, " bytes), try lowering tile_size.");
+                                 cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                 shared_mem) != cudaSuccess) {
+            AT_ERROR("Failed to set maximum shared memory size (requested ", shared_mem,
+                     " bytes), try lowering tile_size.");
         }
         rasterize_to_pixels_bwd_kernel<CDIM, float><<<blocks, threads, shared_mem, stream>>>(
             C, N, n_isects, packed, (float2 *)means2d.data_ptr<float>(),
@@ -405,7 +404,6 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 
     return std::make_tuple(v_means2d_abs, v_means2d, v_conics, v_colors, v_opacities);
 }
-
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 rasterize_to_pixels_bwd_tensor(

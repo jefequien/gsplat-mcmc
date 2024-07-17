@@ -10,7 +10,6 @@
 
 namespace cg = cooperative_groups;
 
-
 /****************************************************************************
  * Projection of Gaussians (Single Batch) Forward Pass
  ****************************************************************************/
@@ -25,13 +24,13 @@ fully_fused_projection_fwd_kernel(const uint32_t C, const uint32_t N,
                                   const T *__restrict__ viewmats, // [C, 4, 4]
                                   const T *__restrict__ Ks,       // [C, 3, 3]
                                   const int32_t image_width, const int32_t image_height,
-                                  const T eps2d, const T near_plane,
-                                  const T far_plane, const T radius_clip,
+                                  const T eps2d, const T near_plane, const T far_plane,
+                                  const T radius_clip,
                                   // outputs
-                                  int32_t *__restrict__ radii,      // [C, N]
+                                  int32_t *__restrict__ radii,  // [C, N]
                                   T *__restrict__ means2d,      // [C, N, 2]
                                   T *__restrict__ depths,       // [C, N]
-                                  T *__restrict__ normals,       // [C, N, 3]
+                                  T *__restrict__ normals,      // [C, N, 3]
                                   T *__restrict__ conics,       // [C, N, 3]
                                   T *__restrict__ compensations // [C, N] optional
 ) {
@@ -47,8 +46,6 @@ fully_fused_projection_fwd_kernel(const uint32_t C, const uint32_t N,
     means += gid * 3;
     viewmats += cid * 16;
     Ks += cid * 9;
-    quats += gid * 4;
-    scales += gid * 3;
 
     // glm is column-major but input is row-major
     mat3<T> R = mat3<T>(viewmats[0], viewmats[4], viewmats[8], // 1st column
@@ -67,6 +64,7 @@ fully_fused_projection_fwd_kernel(const uint32_t C, const uint32_t N,
 
     // transform Gaussian covariance to camera space
     mat3<T> covar;
+    vec3<T> normal;
     if (covars != nullptr) {
         covars += gid * 6;
         covar = mat3<T>(covars[0], covars[1], covars[2], // 1st column
@@ -75,7 +73,13 @@ fully_fused_projection_fwd_kernel(const uint32_t C, const uint32_t N,
         );
     } else {
         // compute from quaternions and scales
-        quat_scale_to_covar_preci<T>(glm::make_vec4(quats), glm::make_vec3(scales), &covar, nullptr);
+        quats += gid * 4;
+        scales += gid * 3;
+        quat_scale_to_covar_preci<T>(glm::make_vec4(quats), glm::make_vec3(scales),
+                                     &covar, nullptr);
+
+        mat3<T> rotmat = quat_to_rotmat<T>(glm::make_vec4(quats));
+        normal = rotmat[2];
     }
     mat3<T> covar_c;
     covar_world_to_cam(R, covar, covar_c);
@@ -83,8 +87,8 @@ fully_fused_projection_fwd_kernel(const uint32_t C, const uint32_t N,
     // perspective projection
     mat2<T> covar2d;
     vec2<T> mean2d;
-    persp_proj<T>(mean_c, covar_c, Ks[0], Ks[4], Ks[2], Ks[5], image_width, image_height,
-                      covar2d, mean2d);
+    persp_proj<T>(mean_c, covar_c, Ks[0], Ks[4], Ks[2], Ks[5], image_width,
+                  image_height, covar2d, mean2d);
 
     T compensation;
     T det = add_blur(eps2d, covar2d, compensation);
@@ -116,16 +120,14 @@ fully_fused_projection_fwd_kernel(const uint32_t C, const uint32_t N,
         return;
     }
 
-    glm::mat3 rotmat = quat_to_rotmat(glm::make_vec4(quats));
-
     // write to outputs
     radii[idx] = (int32_t)radius;
     means2d[idx * 2] = mean2d.x;
     means2d[idx * 2 + 1] = mean2d.y;
     depths[idx] = mean_c.z;
-    normals[idx * 3] = rotmat[2].x;
-    normals[idx * 3 + 1] = rotmat[2].y;
-    normals[idx * 3 + 2] = rotmat[2].z;
+    normals[idx * 3] = normal.x;
+    normals[idx * 3 + 1] = normal.y;
+    normals[idx * 3 + 2] = normal.z;
     conics[idx * 3] = covar2d_inv[0][0];
     conics[idx * 3 + 1] = covar2d_inv[0][1];
     conics[idx * 3 + 2] = covar2d_inv[1][1];
@@ -173,16 +175,17 @@ fully_fused_projection_fwd_tensor(
         compensations = torch::zeros({C, N}, means.options());
     }
     if (C && N) {
-        fully_fused_projection_fwd_kernel<float><<<(C * N + N_THREADS - 1) / N_THREADS, N_THREADS, 0, stream>>>(
-            C, N, means.data_ptr<float>(),
-            covars.has_value() ? covars.value().data_ptr<float>() : nullptr,
-            quats.has_value() ? quats.value().data_ptr<float>() : nullptr,
-            scales.has_value() ? scales.value().data_ptr<float>() : nullptr,
-            viewmats.data_ptr<float>(), Ks.data_ptr<float>(), image_width, image_height,
-            eps2d, near_plane, far_plane, radius_clip, radii.data_ptr<int32_t>(),
-            means2d.data_ptr<float>(), depths.data_ptr<float>(), normals.data_ptr<float>(),
-            conics.data_ptr<float>(),
-            calc_compensations ? compensations.data_ptr<float>() : nullptr);
+        fully_fused_projection_fwd_kernel<float>
+            <<<(C * N + N_THREADS - 1) / N_THREADS, N_THREADS, 0, stream>>>(
+                C, N, means.data_ptr<float>(),
+                covars.has_value() ? covars.value().data_ptr<float>() : nullptr,
+                quats.has_value() ? quats.value().data_ptr<float>() : nullptr,
+                scales.has_value() ? scales.value().data_ptr<float>() : nullptr,
+                viewmats.data_ptr<float>(), Ks.data_ptr<float>(), image_width,
+                image_height, eps2d, near_plane, far_plane, radius_clip,
+                radii.data_ptr<int32_t>(), means2d.data_ptr<float>(),
+                depths.data_ptr<float>(), normals.data_ptr<float>(), conics.data_ptr<float>(),
+                calc_compensations ? compensations.data_ptr<float>() : nullptr);
     }
     return std::make_tuple(radii, means2d, depths, normals, conics, compensations);
 }
