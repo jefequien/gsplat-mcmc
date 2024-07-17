@@ -1,4 +1,5 @@
 import os
+import json
 from typing import Any, Dict, List, Optional
 
 import cv2
@@ -33,7 +34,6 @@ class Parser:
         factor: int = 1,
         normalize: bool = False,
         test_every: int = 8,
-        no_factor_suffix: bool = False,
     ):
         self.data_dir = data_dir
         self.factor = factor
@@ -132,8 +132,24 @@ class Parser:
         camtoworlds = camtoworlds[inds]
         camera_ids = [camera_ids[i] for i in inds]
 
+        # Load extended config
+        self.extconf = {
+            "spiral_radius_scale": 1.0,
+            "no_factor_suffix": False,
+        }
+        extconf_file = os.path.join(data_dir, "ext_metadata.json")
+        if os.path.exists(extconf_file):
+            with open(extconf_file) as f:
+                self.extconf.update(json.load(f))
+
+        # Load bounds
+        self.bounds = np.array([0.01, 1.0])
+        posefile = os.path.join(data_dir, "poses_bounds.npy")
+        if os.path.exists(posefile):
+            self.bounds = np.load(posefile)[:, -2:]
+
         # Load images.
-        if factor > 1 and not no_factor_suffix:
+        if factor > 1 and not self.extconf["no_factor_suffix"]:
             image_dir_suffix = f"_{factor}"
         else:
             image_dir_suffix = ""

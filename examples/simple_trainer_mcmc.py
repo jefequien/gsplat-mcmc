@@ -215,21 +215,12 @@ class Runner:
         # Tensorboard
         self.writer = SummaryWriter(log_dir=f"{cfg.result_dir}/tb")
 
-        self.extconf = {}
-        extconf_file = os.path.join(self.cfg.data_dir, "ext_metadata.json")
-        if os.path.exists(extconf_file):
-            with open(extconf_file) as f:
-                self.extconf = json.load(f)
-
         # Load data: Training data should contain initial points and colors.
         self.parser = Parser(
             data_dir=cfg.data_dir,
             factor=cfg.data_factor,
             normalize=True,
             test_every=cfg.test_every,
-            no_factor_suffix=self.extconf["no_factor_suffix"]
-            if "no_factor_suffix" in self.extconf
-            else False,
         )
         self.trainset = Dataset(
             self.parser,
@@ -861,19 +852,10 @@ class Runner:
                 camtoworlds_all, height=height
             )  # [N, 3, 4]
         elif cfg.render_traj_path == "spiral":
-            posefile = os.path.join(self.cfg.data_dir, "poses_bounds.npy")
-            if os.path.exists(posefile):
-                poses_arr = np.load(posefile)
-                bounds = poses_arr[:, -2:]
-            else:
-                bounds = np.array([0.01, 1.0])
-            bounds *= self.parser.scene_scale
             camtoworlds_all = generate_spiral_path(
                 camtoworlds_all,
-                bounds,
-                spiral_scale_r=self.extconf["spiral_radius_scale"]
-                if "spiral_radius_scale" in self.extconf
-                else 1.0,
+                bounds=self.parser.bounds * self.scene_scale,
+                spiral_scale_r=self.parser.extconf["spiral_radius_scale"],
             )
         else:
             raise ValueError(f"Trajectory type not supported: {cfg.render_traj_path}")
