@@ -15,6 +15,7 @@ import viser
 import nerfview
 from datasets.colmap import Dataset, Parser
 from datasets.traj import generate_interpolated_path, generate_ellipse_path_z
+from datasets.traj_utils import generate_spiral_path
 from torch import Tensor
 from torch.utils.tensorboard import SummaryWriter
 from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMeasure
@@ -32,9 +33,8 @@ from gsplat.rendering import (
     rasterization_inria_wrapper,
 )
 from gsplat.relocation import compute_relocation
+from gsplat.utils.lib_bilagrid import BilateralGrid, slice
 from simple_trainer import create_splats_with_optimizers
-import lib_bilagrid as bilateral_grids
-from gsplat.camera_utils import generate_spiral_path
 
 
 @dataclass
@@ -144,6 +144,11 @@ class Config:
     # Regularization for appearance optimization as weight decay
     app_opt_reg: float = 1e-6
 
+    # Enable exposure optimization. (experimental)
+    exp_opt: bool = False
+    # Weight for total variation loss
+    exp_tv_lambda: float = 10
+
     # Enable depth loss. (experimental)
     depth_loss: bool = False
     # Weight for depth loss
@@ -155,11 +160,6 @@ class Config:
     normal_consistency_lambda: float = 0.05
     # Start applying normal consistency loss after this iteration
     normal_consistency_start_iter: int = 7000
-
-    # Enable bilateral grid optimization. (experimental)
-    bilateral_opt: bool = False
-    # Weight for tv loss
-    bilateral_tv_lambda: float = 10
 
     # Dump information to tensorboard every this steps
     tb_every: int = 100
@@ -257,9 +257,6 @@ class Runner:
             feature_dim=feature_dim,
             device=self.device,
         )
-        self.bil_grids = bilateral_grids.BilateralGrid(len(self.trainset)).to(
-            self.device
-        )
         print("Model initialized. Number of GS:", len(self.splats["means3d"]))
 
         self.pose_optimizers = []
@@ -297,15 +294,16 @@ class Runner:
                     lr=cfg.app_opt_lr * math.sqrt(cfg.batch_size),
                 ),
             ]
-        self.bil_optimizers = []
-        if cfg.bilateral_opt:
+        self.exp_optimizers = []
+        if cfg.exp_opt:
+            self.exp_grids = BilateralGrid(len(self.trainset)).to(self.device)
             adam_kwargs = {
                 "betas": [0.9, 0.99],
                 "eps": 1e-15,
             }
-            self.bil_optimizers = [
+            self.exp_optimizers = [
                 torch.optim.Adam(
-                    self.bil_grids.parameters(),
+                    self.exp_grids.parameters(),
                     lr=0.001 * math.sqrt(cfg.batch_size),
                     **adam_kwargs,
                 ),
@@ -397,10 +395,10 @@ class Runner:
                     self.pose_optimizers[0], gamma=0.01 ** (1.0 / max_steps)
                 )
             )
-        if cfg.bilateral_opt:
+        if cfg.exp_opt:
             schedulers.append(
                 torch.optim.lr_scheduler.ExponentialLR(
-                    self.bil_optimizers[0], gamma=0.01 ** (1.0 / max_steps)
+                    self.exp_optimizers[0], gamma=0.01 ** (1.0 / max_steps)
                 )
             )
 
@@ -466,7 +464,7 @@ class Runner:
             )
             colors = renders[..., :3]
 
-            if cfg.bilateral_opt:
+            if cfg.exp_opt:
                 grid_x, grid_y = torch.meshgrid(
                     torch.arange(width, device="cuda").float(),
                     torch.arange(height, device="cuda").float(),
@@ -478,10 +476,7 @@ class Runner:
                 )
                 pix_xy[..., 0] /= width
                 pix_xy[..., 1] /= height
-                bilgrid_results = bilateral_grids.slice(
-                    self.bil_grids, pix_xy, colors, image_ids
-                )
-                colors = bilgrid_results["rgb"]
+                colors = slice(self.exp_grids, pix_xy, colors, image_ids)["rgb"]
 
             if cfg.random_bkgd:
                 bkgd = torch.rand(1, 3, device=device)
@@ -529,8 +524,8 @@ class Runner:
                 if step > cfg.normal_consistency_start_iter:
                     loss += normalconsistencyloss * cfg.normal_consistency_lambda
 
-            if cfg.bilateral_opt:
-                tvloss = self.bil_grids.tv_loss()
+            if cfg.exp_opt:
+                tvloss = self.exp_grids.tv_loss()
                 loss += 10.0 * tvloss
 
             loss.backward()
@@ -561,7 +556,7 @@ class Runner:
                         normalconsistencyloss.item(),
                         step,
                     )
-                if cfg.bilateral_opt:
+                if cfg.exp_opt:
                     self.writer.add_scalar("train/tvloss", tvloss.item(), step)
                 if cfg.tb_save_image:
                     canvas = torch.cat([pixels, colors], dim=2).detach().cpu().numpy()
@@ -605,7 +600,7 @@ class Runner:
             for optimizer in self.app_optimizers:
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)
-            for optimizer in self.bil_optimizers:
+            for optimizer in self.exp_optimizers:
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)
             for scheduler in schedulers:
