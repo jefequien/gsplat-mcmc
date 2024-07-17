@@ -865,7 +865,6 @@ class Runner:
             camtoworlds_all = generate_ellipse_path_z(
                 camtoworlds_all, height=height
             )  # [N, 3, 4]
-<<<<<<< HEAD
         elif cfg.render_traj_path == "spiral":
             posefile = os.path.join(self.cfg.data_dir, "poses_bounds.npy")
             if os.path.exists(posefile):
@@ -883,12 +882,6 @@ class Runner:
             )
         else:
             raise ValueError(f"Trajectory type not supported: {cfg.render_traj_path}")
-=======
-        else:
-            raise ValueError(
-                f"Render trajectory type not supported: {cfg.render_traj_path}"
-            )
->>>>>>> jeff/normal_consistency
 
         camtoworlds_all = np.concatenate(
             [
