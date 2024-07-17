@@ -24,7 +24,6 @@ from utils import (
     AppearanceOptModule,
     CameraOptModule,
     set_random_seed,
-    color_correct,
 )
 from gsplat import quat_scale_to_covar_preci
 from gsplat.rendering import (
@@ -34,6 +33,7 @@ from gsplat.rendering import (
 )
 from gsplat.relocation import compute_relocation
 from gsplat.utils.lib_bilagrid import BilateralGrid, slice
+from gsplat.utils.color_utils import color_correct
 from simple_trainer import create_splats_with_optimizers
 
 
@@ -461,10 +461,8 @@ class Runner:
                     torch.arange(height, device="cuda").float(),
                     indexing="xy",
                 )
-                pix_xy = (
-                    torch.stack([grid_x, grid_y], dim=-1).reshape(1, height, width, 2)
-                    + 0.5
-                )
+                pix_xy = torch.stack([grid_x, grid_y], dim=-1)
+                pix_xy = pix_xy.reshape(1, height, width, 2) + 0.5
                 pix_xy[..., 0] /= width
                 pix_xy[..., 1] /= height
                 colors = slice(self.exp_grids, pix_xy, colors, image_ids)["rgb"]
@@ -783,7 +781,7 @@ class Runner:
 
             colors = torch.clamp(renders[..., 0:3], 0.0, 1.0)
             cc_colors = color_correct(colors, pixels)
-            canvas_list = [pixels, colors, cc_colors]
+            canvas_list = [pixels, colors]
             if cfg.depth_loss:
                 depths = renders[..., -1:]
                 depths = (depths - depths.min()) / (depths.max() - depths.min())
