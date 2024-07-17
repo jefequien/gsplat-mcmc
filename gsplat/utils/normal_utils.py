@@ -1,8 +1,9 @@
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
 import math
+from torch import Tensor
+
+from .camera_utils import getProjectionMatrix
 
 
 def _depths_to_points(depthmap, world_view_transform, full_proj_transform, ray=False):
@@ -40,21 +41,26 @@ def _depth_to_normal(depth, world_view_transform, full_proj_transform):
     output = torch.zeros_like(points)
     dx = torch.cat([points[2:, 1:-1] - points[:-2, 1:-1]], dim=0)
     dy = torch.cat([points[1:-1, 2:] - points[1:-1, :-2]], dim=1)
-    normal_map = torch.nn.functional.normalize(torch.cross(dx, dy, dim=-1), dim=-1)
+    normal_map = F.normalize(torch.cross(dx, dy, dim=-1), dim=-1)
     output[1:-1, 1:-1, :] = normal_map
     return output
 
 
-def depth_to_normal(depths, camtoworlds, Ks, near_plane, far_plane):
+def depth_to_normal(
+    depths: Tensor,  # [C, H, W, 1]
+    viewmats: Tensor,  # [C, 4, 4]
+    Ks: Tensor,  # [C, 3, 3]
+    near_plane: float = 0.01,
+    far_plane: float = 1e10,
+) -> Tensor:
     height, width = depths.shape[1:3]
-    viewmats = torch.linalg.inv(camtoworlds)  # [C, 4, 4]
 
     normals = []
     for cid, depth in enumerate(depths):
         FoVx = 2 * math.atan(width / (2 * Ks[cid, 0, 0].item()))
         FoVy = 2 * math.atan(height / (2 * Ks[cid, 1, 1].item()))
         world_view_transform = viewmats[cid].transpose(0, 1)
-        projection_matrix = _getProjectionMatrix(
+        projection_matrix = getProjectionMatrix(
             znear=near_plane, zfar=far_plane, fovX=FoVx, fovY=FoVy, device=depths.device
         ).transpose(0, 1)
         full_proj_transform = (
@@ -72,7 +78,7 @@ def depth_to_rays(depths, camtoworlds, Ks, near_plane, far_plane):
     FoVx = 2 * math.atan(width / (2 * Ks[0, 0, 0].item()))
     FoVy = 2 * math.atan(height / (2 * Ks[0, 1, 1].item()))
     world_view_transform = viewmats[0].transpose(0, 1)
-    projection_matrix = _getProjectionMatrix(
+    projection_matrix = getProjectionMatrix(
         znear=near_plane, zfar=far_plane, fovX=FoVx, fovY=FoVy, device=depths.device
     ).transpose(0, 1)
     full_proj_transform = (
@@ -80,25 +86,3 @@ def depth_to_rays(depths, camtoworlds, Ks, near_plane, far_plane):
     ).squeeze(0)
     ray_o = _depths_to_points(depths[0], world_view_transform, full_proj_transform, ray=True)
     return ray_o
-
-def _getProjectionMatrix(znear, zfar, fovX, fovY, device="cuda"):
-    tanHalfFovY = math.tan((fovY / 2))
-    tanHalfFovX = math.tan((fovX / 2))
-
-    top = tanHalfFovY * znear
-    bottom = -top
-    right = tanHalfFovX * znear
-    left = -right
-
-    P = torch.zeros(4, 4, device=device)
-
-    z_sign = 1.0
-
-    P[0, 0] = 2.0 * znear / (right - left)
-    P[1, 1] = 2.0 * znear / (top - bottom)
-    P[0, 2] = (right + left) / (right - left)
-    P[1, 2] = (top + bottom) / (top - bottom)
-    P[3, 2] = z_sign
-    P[2, 2] = z_sign * zfar / (zfar - znear)
-    P[2, 3] = -(zfar * znear) / (zfar - znear)
-    return P

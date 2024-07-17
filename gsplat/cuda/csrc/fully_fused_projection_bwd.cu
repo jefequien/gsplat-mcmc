@@ -60,7 +60,6 @@ __global__ void fully_fused_projection_bwd_kernel(
 
     v_means2d += idx * 2;
     v_depths += idx;
-    v_normals += idx * 3;
     v_conics += idx * 3;
 
     // vjp: compute the inverse of the 2d covariance
@@ -155,10 +154,13 @@ __global__ void fully_fused_projection_bwd_kernel(
         vec3<T> v_scale(0.f);
         quat_scale_to_covar_vjp<T>(quat, scale, rotmat, v_covar, v_quat, v_scale);
 
-        // add contribution from v_normals. Please check if this is correct.
-        mat3<T> v_R = quat_to_rotmat<T>(quat);
-        v_R[2] += glm::make_vec3(v_normals);
-        quat_to_rotmat_vjp<T>(quat, v_R, v_quat);
+        // add contribution from v_normals
+        v_normals += idx * 3;
+        quat_to_rotmat_vjp<T>(
+            quat,
+            mat3<T>(0.f, 0.f, 0.f, 0.f, 0.f, 0.f, v_normals[0], v_normals[1], v_normals[2]),
+            v_quat
+        );
 
         warpSum(v_quat, warp_group_g);
         warpSum(v_scale, warp_group_g);
