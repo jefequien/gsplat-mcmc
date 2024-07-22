@@ -184,6 +184,23 @@ def create_splats_with_optimizers(
     quats = torch.rand((N, 4))  # [N, 4]
     opacities = torch.logit(torch.full((N,), init_opacity))  # [N,]
 
+    use_skybox = True
+    num_skybox_pts = 10_000
+    if use_skybox:
+        theta = (2.0 * torch.pi * torch.rand(num_skybox_pts))
+        phi = torch.arccos(1.0 - 1.4 * torch.rand(num_skybox_pts))
+        skybox_xyz = torch.zeros((num_skybox_pts, 3))
+        skybox_xyz[:, 0] = scene_scale * 20 * torch.cos(theta)*torch.sin(phi)
+        skybox_xyz[:, 1] = scene_scale * 20 * torch.sin(theta)*torch.sin(phi)
+        skybox_xyz[:, 2] = scene_scale * 20 * torch.cos(phi)
+        
+        N += num_skybox_pts
+        points = torch.concat((skybox_xyz, points))
+        rgbs = torch.concat((torch.rand((num_skybox_pts, 3)), rgbs))
+        scales = torch.concat((torch.full((num_skybox_pts, 3), dist_avg.mean()), scales))
+        quats = torch.concat((torch.rand((num_skybox_pts, 4)), quats))
+        opacities = torch.concat((torch.full((num_skybox_pts,), 0.7), opacities))
+
     params = [
         # name, value, lr
         ("means", torch.nn.Parameter(points), 1.6e-4 * scene_scale),

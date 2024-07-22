@@ -110,6 +110,8 @@ class Config:
 
     # Use random background for training to discourage transparency
     random_bkgd: bool = False
+    # Use skybox
+    use_skybox: bool = False
 
     # Enable camera optimization.
     pose_opt: bool = False
@@ -474,14 +476,20 @@ class Runner:
                     self.writer.add_image("train/render", canvas, step)
                 self.writer.flush()
 
-            self.strategy.step_post_backward(
-                params=self.splats,
-                optimizers=self.optimizers,
-                state=self.strategy_state,
-                step=step,
-                info=info,
-                lr=schedulers[0].get_last_lr()[0],
-            )
+            num_skybox_pts = 10_000
+            self.splats["means"].grad[:num_skybox_pts] = 0
+            # self.splats["scales"].grad[:num_skybox_pts] = 0
+            # self.splats["quats"].grad[:num_skybox_pts] = 0
+            # self.splats["opacities"].grad[:num_skybox_pts] = 0
+            
+            # self.strategy.step_post_backward(
+            #     params=self.splats,
+            #     optimizers=self.optimizers,
+            #     state=self.strategy_state,
+            #     step=step,
+            #     info=info,
+            #     lr=schedulers[0].get_last_lr()[0],
+            # )
 
             # Turn Gradients into Sparse Tensor before running optimizer
             if cfg.sparse_grad:

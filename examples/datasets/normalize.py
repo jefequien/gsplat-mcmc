@@ -17,6 +17,7 @@ def similarity_from_cameras(c2w, strict_scaling=False, center_method="focus"):
     ups = np.sum(R * np.array([0, -1.0, 0]), axis=-1)
     world_up = np.mean(ups, axis=0)
     world_up /= np.linalg.norm(world_up)
+    world_up *= -1
 
     up_camspace = np.array([0.0, -1.0, 0.0])
     c = (up_camspace * world_up).sum()

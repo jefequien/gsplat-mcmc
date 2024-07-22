@@ -214,7 +214,8 @@ def relocate(
         mask: A boolean mask to indicates which Gaussians are dead.
     """
     opacities = torch.sigmoid(params["opacities"])
-
+    opacities[:10_000] = 0
+    
     dead_indices = mask.nonzero(as_tuple=True)[0]
     alive_indices = (~mask).nonzero(as_tuple=True)[0]
     n = len(dead_indices)
@@ -261,6 +262,7 @@ def sample_add(
     min_opacity: float = 0.005,
 ):
     opacities = torch.sigmoid(params["opacities"])
+    opacities[:10_000] = 0
 
     eps = torch.finfo(torch.float32).eps
     probs = opacities
