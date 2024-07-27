@@ -33,6 +33,10 @@ def _update_param_with_optimizer(
         names = list(params.keys())
 
     for name in names:
+        # if name == "shN_indices" or name == "shN_codebook":
+        #     params[name] = param_fn(name, params[name])
+        #     continue
+
         optimizer = optimizers[name]
         for i, param_group in enumerate(optimizer.param_groups):
             p = param_group["params"][0]
@@ -41,7 +45,7 @@ def _update_param_with_optimizer(
             for key in p_state.keys():
                 if key != "step":
                     v = p_state[key]
-                    p_state[key] = optimizer_fn(key, v)
+                    p_state[key] = optimizer_fn(name, key, v)
             p_new = param_fn(name, p)
             optimizer.param_groups[i]["params"] = [p_new]
             optimizer.state[p_new] = p_state
@@ -232,7 +236,25 @@ def relocate(
     )
     new_opacities = torch.clamp(new_opacities, max=1.0 - eps, min=min_opacity)
 
+    clusters_ids = torch.arange(2**16).cuda()
+    alive_cluster_ids = torch.unique(params["shN_indices"][~mask]).int()
+    dead_cluster_mask = torch.ones(2**16, dtype=torch.bool)
+    dead_cluster_mask[alive_cluster_ids] = 0
+    dead_cluster_ids = clusters_ids[dead_cluster_mask]
+    R = min(n, len(dead_cluster_ids))
+    sampled_codebook_indices = params["shN_indices"][sampled_idxs[:R]].int()
+    sampled_codebook = params["shN_codebook"][sampled_codebook_indices]
+
     def param_fn(name: str, p: Tensor) -> Tensor:
+        if name == "shN_indices":
+            p[dead_indices] = p[sampled_idxs]
+            p[dead_indices[:R]] = dead_cluster_ids[:R].float()
+            return torch.nn.Parameter(p)
+        if name == "shN_codebook":
+            # p[dead_clusters] = 0
+            p[dead_cluster_ids[:R]] = sampled_codebook
+            return torch.nn.Parameter(p)
+
         if name == "opacities":
             p[sampled_idxs] = torch.logit(new_opacities)
         elif name == "scales":
@@ -240,7 +262,11 @@ def relocate(
         p[dead_indices] = p[sampled_idxs]
         return torch.nn.Parameter(p)
 
-    def optimizer_fn(key: str, v: Tensor) -> Tensor:
+    def optimizer_fn(name: str, key: str, v: Tensor) -> Tensor:
+        if name == "shN_codebook":
+            v[sampled_codebook_indices] = 0
+            return v
+
         v[sampled_idxs] = 0
         return v
 
@@ -274,6 +300,9 @@ def sample_add(
     new_opacities = torch.clamp(new_opacities, max=1.0 - eps, min=min_opacity)
 
     def param_fn(name: str, p: Tensor) -> Tensor:
+        if name == "shN_codebook":
+            return torch.nn.Parameter(p)
+
         if name == "opacities":
             p[sampled_idxs] = torch.logit(new_opacities)
         elif name == "scales":
@@ -281,7 +310,10 @@ def sample_add(
         p = torch.cat([p, p[sampled_idxs]])
         return torch.nn.Parameter(p)
 
-    def optimizer_fn(key: str, v: Tensor) -> Tensor:
+    def optimizer_fn(name: str, key: str, v: Tensor) -> Tensor:
+        if name == "shN_codebook":
+            return v
+
         v_new = torch.zeros((len(sampled_idxs), *v.shape[1:]), device=v.device)
         return torch.cat([v, v_new])
 

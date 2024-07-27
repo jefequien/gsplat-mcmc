@@ -194,10 +194,18 @@ def create_splats_with_optimizers(
 
     if feature_dim is None:
         # color is SH coefficients.
-        colors = torch.zeros((N, (sh_degree + 1) ** 2, 3))  # [N, K, 3]
+        K = (sh_degree + 1) ** 2
+        colors = torch.zeros((N, K, 3))  # [N, K, 3]
         colors[:, 0, :] = rgb_to_sh(rgbs)
         params.append(("sh0", torch.nn.Parameter(colors[:, :1, :]), 2.5e-3))
-        params.append(("shN", torch.nn.Parameter(colors[:, 1:, :]), 2.5e-3 / 20))
+        params.append(("shN_indices", torch.zeros(N), 0.0))
+        params.append(
+            (
+                "shN_codebook",
+                torch.nn.Parameter(torch.zeros(2**16, K - 1, 3)),
+                2.5e-3 / 20,
+            )
+        )
     else:
         # features will be used for appearance and view-dependent shading
         features = torch.rand(N, feature_dim)  # [N, feature_dim]

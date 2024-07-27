@@ -120,8 +120,8 @@ class MCMCStrategy(Strategy):
         binoms = state["binoms"]
 
         if (
-            step < self.refine_stop_iter
-            and step > self.refine_start_iter
+            step <= self.refine_stop_iter
+            and step >= self.refine_start_iter
             and step % self.refine_every == 0
         ):
             # teleport GSs
@@ -154,6 +154,7 @@ class MCMCStrategy(Strategy):
         opacities = torch.sigmoid(params["opacities"])
         dead_mask = opacities <= self.min_opacity
         n_gs = dead_mask.sum().item()
+
         if n_gs > 0:
             relocate(
                 params=params,

@@ -297,7 +297,8 @@ class Runner:
             colors = colors + self.splats["colors"]
             colors = torch.sigmoid(colors)
         else:
-            colors = torch.cat([self.splats["sh0"], self.splats["shN"]], 1)  # [N, K, 3]
+            shN = self.splats["shN_codebook"][self.splats["shN_indices"].int()]
+            colors = torch.cat([self.splats["sh0"], shN], 1)  # [N, K, 3]
 
         rasterize_mode = "antialiased" if self.cfg.antialiased else "classic"
         render_colors, render_alphas, info = rasterization(
@@ -465,6 +466,11 @@ class Runner:
                 self.writer.add_scalar("train/l1loss", l1loss.item(), step)
                 self.writer.add_scalar("train/ssimloss", ssimloss.item(), step)
                 self.writer.add_scalar("train/num_GS", len(self.splats["means"]), step)
+                self.writer.add_scalar(
+                    "train/num_clusters",
+                    len(torch.unique(self.splats["shN_indices"].int())),
+                    step,
+                )
                 self.writer.add_scalar("train/mem", mem, step)
                 if cfg.depth_loss:
                     self.writer.add_scalar("train/depthloss", depthloss.item(), step)
@@ -582,7 +588,8 @@ class Runner:
             # write images
             canvas = torch.cat([pixels, colors], dim=2).squeeze(0).cpu().numpy()
             imageio.imwrite(
-                f"{self.render_dir}/val_{i:04d}.png", (canvas * 255).astype(np.uint8)
+                f"{self.render_dir}/val_step{step:04d}_{i:04d}.png",
+                (canvas * 255).astype(np.uint8),
             )
 
             pixels = pixels.permute(0, 3, 1, 2)  # [1, 3, H, W]
@@ -599,7 +606,7 @@ class Runner:
         print(
             f"PSNR: {psnr.item():.3f}, SSIM: {ssim.item():.4f}, LPIPS: {lpips.item():.3f} "
             f"Time: {ellipse_time:.3f}s/image "
-            f"Number of GS: {len(self.splats['means'])}"
+            f"Number of GS: {len(self.splats['means'])} "
         )
         # save stats as json
         stats = {
@@ -608,6 +615,7 @@ class Runner:
             "lpips": lpips.item(),
             "ellipse_time": ellipse_time,
             "num_GS": len(self.splats["means"]),
+            "num_clusters": len(torch.unique(self.splats["shN_indices"].int())),
         }
         with open(f"{self.stats_dir}/val_step{step:04d}.json", "w") as f:
             json.dump(stats, f)
