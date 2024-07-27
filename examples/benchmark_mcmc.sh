@@ -19,7 +19,7 @@ do
     SAVE_STEPS="2000 7000 15000 30000"
 
     python simple_trainer_mcmc.py --eval_steps $EVAL_STEPS --save_steps $SAVE_STEPS --disable_viewer --data_factor $DATA_FACTOR \
-        --init_type random \
+        --init_type sfm \
         --cap_max $CAP_MAX \
         --max_steps $MAX_STEPS \
         --data_dir $SCENE_DIR/$SCENE/ \
