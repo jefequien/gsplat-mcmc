@@ -91,6 +91,8 @@ class Config:
     opacity_reg = 0.01
     # Scale regularization
     scale_reg = 0.01
+    # shN regularization
+    shN_reg = 0.01
 
     # Start refining GSs after this iteration
     refine_start_iter: int = 500
@@ -297,6 +299,11 @@ class Runner:
             colors = colors + self.splats["colors"]
             colors = torch.sigmoid(colors)
         else:
+            # shN_indices = self.splats["shN_indices"].int()
+            # shN = torch.zeros(shN_indices.shape[0], *self.splats["shN_codebook"].shape[1:]).to(self.device)
+            # nonzero_indices = shN_indices != 0
+            # shN[nonzero_indices] = self.splats["shN_codebook"][shN_indices[nonzero_indices]]
+
             shN = self.splats["shN_codebook"][self.splats["shN_indices"].int()]
             colors = torch.cat([self.splats["sh0"], shN], 1)  # [N, K, 3]
 
@@ -448,6 +455,7 @@ class Runner:
                 loss
                 + cfg.scale_reg * torch.abs(torch.exp(self.splats["scales"])).mean()
             )
+            loss += cfg.shN_reg * torch.abs(self.splats["shN_codebook"]).mean()
 
             loss.backward()
 
@@ -468,7 +476,7 @@ class Runner:
                 self.writer.add_scalar("train/num_GS", len(self.splats["means"]), step)
                 self.writer.add_scalar(
                     "train/num_clusters",
-                    len(torch.unique(self.splats["shN_indices"].int())),
+                    len(self.splats["shN_codebook"]),
                     step,
                 )
                 self.writer.add_scalar("train/mem", mem, step)
@@ -615,7 +623,7 @@ class Runner:
             "lpips": lpips.item(),
             "ellipse_time": ellipse_time,
             "num_GS": len(self.splats["means"]),
-            "num_clusters": len(torch.unique(self.splats["shN_indices"].int())),
+            "num_clusters": len(self.splats["shN_codebook"]),
         }
         with open(f"{self.stats_dir}/val_step{step:04d}.json", "w") as f:
             json.dump(stats, f)

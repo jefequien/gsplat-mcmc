@@ -236,24 +236,14 @@ def relocate(
     )
     new_opacities = torch.clamp(new_opacities, max=1.0 - eps, min=min_opacity)
 
-    clusters_ids = torch.arange(2**16).cuda()
-    alive_cluster_ids = torch.unique(params["shN_indices"][~mask]).int()
-    dead_cluster_mask = torch.ones(2**16, dtype=torch.bool)
-    dead_cluster_mask[alive_cluster_ids] = 0
-    dead_cluster_ids = clusters_ids[dead_cluster_mask]
-    R = min(n, len(dead_cluster_ids))
-    sampled_codebook_indices = params["shN_indices"][sampled_idxs[:R]].int()
-    sampled_codebook = params["shN_codebook"][sampled_codebook_indices]
-
     def param_fn(name: str, p: Tensor) -> Tensor:
-        if name == "shN_indices":
-            p[dead_indices] = p[sampled_idxs]
-            p[dead_indices[:R]] = dead_cluster_ids[:R].float()
-            return torch.nn.Parameter(p)
         if name == "shN_codebook":
-            # p[dead_clusters] = 0
-            p[dead_cluster_ids[:R]] = sampled_codebook
+            # p[dead_cluster_ids[:R]] = sampled_codebook
             return torch.nn.Parameter(p)
+        # if name == "shN_indices":
+        #     p[dead_indices] = p[sampled_idxs]
+        #     p[dead_indices[:R]] = dead_cluster_ids[:R].float()
+        #     return torch.nn.Parameter(p)
 
         if name == "opacities":
             p[sampled_idxs] = torch.logit(new_opacities)
@@ -323,6 +313,108 @@ def sample_add(
     for k, v in state.items():
         v_new = torch.zeros((len(sampled_idxs), *v.shape[1:]), device=v.device)
         state[k] = torch.cat((v, v_new))
+
+
+@torch.no_grad()
+def relocate_sh_clusters(
+    params: Union[Dict[str, torch.nn.Parameter], torch.nn.ParameterDict],
+    optimizers: Dict[str, torch.optim.Optimizer],
+    mask: Tensor,
+):
+    dead_codebook_indices = mask.nonzero(as_tuple=True)[0]
+    n = len(dead_codebook_indices)
+
+    codebook_indices, codebook_counts = torch.unique(
+        params["shN_indices"], return_counts=True
+    )
+    sampled_codebook_indices = codebook_indices[torch.argsort(codebook_counts)[:n]]
+
+    def param_fn(name: str, p: Tensor) -> Tensor:
+        if name == "shN_codebook":
+            p[dead_codebook_indices] = p[sampled_codebook_indices]
+        elif name == "sh_indices":
+            for d, s in zip(dead_codebook_indices, sampled_codebook_indices):
+                p[p == d] = 0
+
+                sampled_idxs = (p == s).nonzero(as_tuple=True)[0]
+                sampled_idxs_half = sampled_idxs[: int(0.5 * len(sampled_idxs))]
+                p[sampled_idxs_half] = d
+        return torch.nn.Parameter(p)
+
+    def optimizer_fn(name: str, key: str, v: Tensor) -> Tensor:
+        if name == "shN_codebook":
+            v[sampled_codebook_indices] = 0
+        return v
+
+    # update the parameters and the state in the optimizers
+    _update_param_with_optimizer(param_fn, optimizer_fn, params, optimizers)
+
+
+@torch.no_grad()
+def add_sh_clusters(
+    params: Union[Dict[str, torch.nn.Parameter], torch.nn.ParameterDict],
+    optimizers: Dict[str, torch.optim.Optimizer],
+    n: int,
+):
+    new_codebook_indices = torch.arange(
+        len(params["shN_codebook"]), len(params["shN_codebook"]) + n
+    )
+    codebook_indices, codebook_counts = torch.unique(
+        params["shN_indices"], return_counts=True
+    )
+    sampled_codebook_indices = codebook_indices[torch.argsort(codebook_counts)[:n]]
+
+    def param_fn(name: str, p: Tensor) -> Tensor:
+        if name == "shN_codebook":
+            p = torch.cat([p, p[sampled_codebook_indices]])
+        elif name == "sh_indices":
+            for idx_n, idx_s in zip(new_codebook_indices, sampled_codebook_indices):
+                sampled_idxs = (p == idx_s).nonzero(as_tuple=True)[0]
+                sampled_idxs_half = sampled_idxs[: int(0.5 * len(sampled_idxs))]
+                p[sampled_idxs_half] = idx_n
+
+        return torch.nn.Parameter(p)
+
+    def optimizer_fn(name: str, key: str, v: Tensor) -> Tensor:
+        if name == "shN_codebook":
+            v_new = torch.zeros(
+                (len(new_codebook_indices), *v.shape[1:]), device=v.device
+            )
+            v = torch.cat([v, v_new])
+        return v
+
+    # update the parameters and the state in the optimizers
+    _update_param_with_optimizer(param_fn, optimizer_fn, params, optimizers)
+
+    # current_n_clusters = 2**16 # int(params["shN_indices"].max()) + 1
+    # n_clusters_target = min(2**16, int(1.05 * current_n_clusters))
+
+    # codebook = params["shN_codebook"].reshape(2**16, -1)
+    # useless_mask = codebook[:current_n_clusters].abs().max(dim=-1)[0] < 0.05
+    # # useless_mask = torch.linalg.norm(codebook[:current_n_clusters], dim=-1) < 0.05
+    # useless_cluster_ids = torch.arange(current_n_clusters).cuda()
+    # useless_cluster_ids = useless_cluster_ids[useless_mask]
+    # print("Num useless clusters: ", len(useless_cluster_ids), current_n_clusters)
+
+    # # # Point useless clusters at zero
+    # # params["shN_codebook"][useless_cluster_ids] = 0
+    # # for i in useless_cluster_ids:
+    # #     params["shN_indices"][params["shN_indices"] == i] = 0
+
+    # clusters_ids = torch.arange(n_clusters_target).cuda()
+    # alive_cluster_mask = torch.zeros(n_clusters_target, dtype=torch.bool)
+    # alive_cluster_mask[torch.unique(params["shN_indices"][~mask]).int()] = 1
+    # # alive_cluster_mask[useless_cluster_ids] = 0 # Give away useless cluster ids
+    # dead_cluster_ids = clusters_ids[~alive_cluster_mask]
+
+    # # clusters_ids = torch.arange(2**16).cuda()
+    # # dead_cluster_mask = torch.ones(2**16, dtype=torch.bool)
+    # # dead_cluster_mask[torch.unique(params["shN_indices"][~mask]).int()] = 0
+    # # dead_cluster_ids = clusters_ids[dead_cluster_mask]
+
+    # R = min(n, len(dead_cluster_ids))
+    # sampled_codebook_indices = params["shN_indices"][sampled_idxs[:R]].int()
+    # sampled_codebook = params["shN_codebook"][sampled_codebook_indices]
 
 
 @torch.no_grad()
