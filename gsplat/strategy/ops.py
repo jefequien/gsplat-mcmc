@@ -317,29 +317,30 @@ def relocate_sh_clusters(
 ):
     dead_codebook_indices = mask.nonzero(as_tuple=True)[0]
     n = len(dead_codebook_indices)
-
-    codebook_indices, codebook_counts = torch.unique(
-        params["shN_indices"], return_counts=True
-    )
-    sampled_codebook_indices = codebook_indices[
-        torch.argsort(codebook_counts)[:n]
-    ].int()
+    
+    codebook_size = len(params["shN_codebook"])
+    codebook_counts = torch.bincount(params["shN_indices"].int(), minlength=codebook_size)
+    sampled_codebook_indices = torch.argsort(codebook_counts[1:], descending=True)[:n] + 1
+    # print("Zero cluster size", codebook_counts[0])
+    print("Top 5 clusters", sampled_codebook_indices[:5])
+    print("Top 5 counts", codebook_counts[sampled_codebook_indices][:5])
 
     def param_fn(name: str, p: Tensor) -> Tensor:
         if name == "shN_codebook":
             p[dead_codebook_indices] = p[sampled_codebook_indices]
-        elif name == "sh_indices":
-            for d, s in zip(dead_codebook_indices, sampled_codebook_indices):
-                p[p == d] = 0
+        elif name == "shN_indices":
+            indices = p.int()
+            for idx_d, idx_s in zip(dead_codebook_indices, sampled_codebook_indices):
+                p[indices == idx_d] = 0
 
-                sampled_idxs = (p == s).nonzero(as_tuple=True)[0]
-                sampled_idxs_half = sampled_idxs[: int(0.5 * len(sampled_idxs))]
-                p[sampled_idxs_half] = d
+                indices_idxs = (indices == idx_s).nonzero(as_tuple=True)[0]
+                indices_idxs_half = indices_idxs[: int(0.5 * len(indices_idxs))]
+                p[indices_idxs_half] = idx_d.float()
         return torch.nn.Parameter(p)
 
     def optimizer_fn(name: str, key: str, v: Tensor) -> Tensor:
         if name == "shN_codebook":
-            v[sampled_codebook_indices] = 0
+            v[dead_codebook_indices] = v[sampled_codebook_indices]
         return v
 
     # update the parameters and the state in the optimizers
@@ -352,24 +353,24 @@ def add_sh_clusters(
     optimizers: Dict[str, torch.optim.Optimizer],
     n: int,
 ):
-    new_codebook_indices = torch.arange(
-        len(params["shN_codebook"]), len(params["shN_codebook"]) + n
-    )
-    codebook_indices, codebook_counts = torch.unique(
-        params["shN_indices"], return_counts=True
-    )
-    sampled_codebook_indices = codebook_indices[
-        torch.argsort(codebook_counts)[:n]
-    ].int()
+    codebook_size = len(params["shN_codebook"])
+    codebook_counts = torch.bincount(params["shN_indices"].int(), minlength=codebook_size)
+    sampled_codebook_indices = torch.argsort(codebook_counts[1:], descending=True)[:n] + 1
+    # print("Zero cluster size", codebook_counts[0])
+    print("Top 5 clusters", sampled_codebook_indices[:5])
+    print("Top 5 counts", codebook_counts[sampled_codebook_indices][:5])
+    
+    new_codebook_indices = torch.arange(codebook_size, codebook_size + n)
 
     def param_fn(name: str, p: Tensor) -> Tensor:
         if name == "shN_codebook":
             p = torch.cat([p, p[sampled_codebook_indices]])
-        elif name == "sh_indices":
+        elif name == "shN_indices":
+            indices = p.int()
             for idx_n, idx_s in zip(new_codebook_indices, sampled_codebook_indices):
-                sampled_idxs = (p == idx_s).nonzero(as_tuple=True)[0]
-                sampled_idxs_half = sampled_idxs[: int(0.5 * len(sampled_idxs))]
-                p[sampled_idxs_half] = idx_n
+                indices_idxs = (indices == idx_s).nonzero(as_tuple=True)[0]
+                indices_idxs_half = indices_idxs[: int(0.5 * len(indices_idxs))]
+                p[indices_idxs_half] = idx_n.float()
 
         return torch.nn.Parameter(p)
 

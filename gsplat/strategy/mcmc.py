@@ -143,6 +143,13 @@ class MCMCStrategy(Strategy):
                     f"Now having {len(params['means'])} GSs."
                 )
 
+            torch.cuda.empty_cache()
+
+        if (
+            step <= self.refine_stop_iter
+            and step >= 2000
+            and step % self.refine_every == 0
+        ):
             # relocate sh clusters
             n_relocated_sh_clusters = self._relocate_sh_clusters(params, optimizers)
             if self.verbose:
@@ -151,7 +158,10 @@ class MCMCStrategy(Strategy):
             # add new sh clusters
             n_new_sh_clusters = self._add_sh_clusters(params, optimizers)
             if self.verbose:
-                print(f"Step {step}: Added {n_new_sh_clusters} SH clusters. ")
+                print(
+                    f"Step {step}: Added {n_new_sh_clusters} SH clusters. "
+                    f"Now having {len(params['shN_codebook'])} SH clusters."
+                )
 
             torch.cuda.empty_cache()
 
@@ -209,7 +219,8 @@ class MCMCStrategy(Strategy):
         params: Union[Dict[str, torch.nn.Parameter], torch.nn.ParameterDict],
         optimizers: Dict[str, torch.optim.Optimizer],
     ) -> int:
-        dead_mask = params["shN_codebook"].abs().max(dim=-1)[0] < 0.05
+        current_n_clusters = len(params["shN_codebook"])
+        dead_mask = params["shN_codebook"].reshape(current_n_clusters, -1).abs().max(dim=-1)[0] < 0.05
         n_clusters = dead_mask.sum().item()
 
         if n_clusters > 0:
@@ -233,7 +244,6 @@ class MCMCStrategy(Strategy):
             add_sh_clusters(
                 params=params,
                 optimizers=optimizers,
-                state={},
                 n=n_clusters,
             )
         return n_clusters
