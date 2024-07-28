@@ -321,9 +321,9 @@ def relocate_sh_clusters(
     codebook_size = len(params["shN_codebook"])
     codebook_counts = torch.bincount(params["shN_indices"].int(), minlength=codebook_size)
     sampled_codebook_indices = torch.argsort(codebook_counts[1:], descending=True)[:n] + 1
-    # print("Zero cluster size", codebook_counts[0])
-    print("Top 5 clusters", sampled_codebook_indices[:5])
-    print("Top 5 counts", codebook_counts[sampled_codebook_indices][:5])
+    print("Zero cluster size", codebook_counts[0])
+    # print("Top 5 clusters", sampled_codebook_indices[:5])
+    # print("Top 5 counts", codebook_counts[sampled_codebook_indices][:5])
 
     def param_fn(name: str, p: Tensor) -> Tensor:
         if name == "shN_codebook":
@@ -347,43 +347,43 @@ def relocate_sh_clusters(
     _update_param_with_optimizer(param_fn, optimizer_fn, params, optimizers)
 
 
-@torch.no_grad()
-def add_sh_clusters(
-    params: Union[Dict[str, torch.nn.Parameter], torch.nn.ParameterDict],
-    optimizers: Dict[str, torch.optim.Optimizer],
-    n: int,
-):
-    codebook_size = len(params["shN_codebook"])
-    codebook_counts = torch.bincount(params["shN_indices"].int(), minlength=codebook_size)
-    sampled_codebook_indices = torch.argsort(codebook_counts[1:], descending=True)[:n] + 1
-    # print("Zero cluster size", codebook_counts[0])
-    print("Top 5 clusters", sampled_codebook_indices[:5])
-    print("Top 5 counts", codebook_counts[sampled_codebook_indices][:5])
+# @torch.no_grad()
+# def add_sh_clusters(
+#     params: Union[Dict[str, torch.nn.Parameter], torch.nn.ParameterDict],
+#     optimizers: Dict[str, torch.optim.Optimizer],
+#     n: int,
+# ):
+#     codebook_size = len(params["shN_codebook"])
+#     codebook_counts = torch.bincount(params["shN_indices"].int(), minlength=codebook_size)
+#     sampled_codebook_indices = torch.argsort(codebook_counts[1:], descending=True)[:n] + 1
+#     # print("Zero cluster size", codebook_counts[0])
+#     # print("Top 5 clusters", sampled_codebook_indices[:5])
+#     # print("Top 5 counts", codebook_counts[sampled_codebook_indices][:5])
     
-    new_codebook_indices = torch.arange(codebook_size, codebook_size + n)
+#     new_codebook_indices = torch.arange(codebook_size, codebook_size + n)
 
-    def param_fn(name: str, p: Tensor) -> Tensor:
-        if name == "shN_codebook":
-            p = torch.cat([p, p[sampled_codebook_indices]])
-        elif name == "shN_indices":
-            indices = p.int()
-            for idx_n, idx_s in zip(new_codebook_indices, sampled_codebook_indices):
-                indices_idxs = (indices == idx_s).nonzero(as_tuple=True)[0]
-                indices_idxs_half = indices_idxs[: int(0.5 * len(indices_idxs))]
-                p[indices_idxs_half] = idx_n.float()
+#     def param_fn(name: str, p: Tensor) -> Tensor:
+#         if name == "shN_codebook":
+#             p = torch.cat([p, p[sampled_codebook_indices]])
+#         elif name == "shN_indices":
+#             indices = p.int()
+#             for idx_n, idx_s in zip(new_codebook_indices, sampled_codebook_indices):
+#                 indices_idxs = (indices == idx_s).nonzero(as_tuple=True)[0]
+#                 indices_idxs_half = indices_idxs[: int(0.5 * len(indices_idxs))]
+#                 p[indices_idxs_half] = idx_n.float()
 
-        return torch.nn.Parameter(p)
+#         return torch.nn.Parameter(p)
 
-    def optimizer_fn(name: str, key: str, v: Tensor) -> Tensor:
-        if name == "shN_codebook":
-            v_new = torch.zeros(
-                (len(new_codebook_indices), *v.shape[1:]), device=v.device
-            )
-            v = torch.cat([v, v_new])
-        return v
+#     def optimizer_fn(name: str, key: str, v: Tensor) -> Tensor:
+#         if name == "shN_codebook":
+#             v_new = torch.zeros(
+#                 (len(new_codebook_indices), *v.shape[1:]), device=v.device
+#             )
+#             v = torch.cat([v, v_new])
+#         return v
 
-    # update the parameters and the state in the optimizers
-    _update_param_with_optimizer(param_fn, optimizer_fn, params, optimizers)
+#     # update the parameters and the state in the optimizers
+#     _update_param_with_optimizer(param_fn, optimizer_fn, params, optimizers)
 
     # current_n_clusters = 2**16 # int(params["shN_indices"].max()) + 1
     # n_clusters_target = min(2**16, int(1.05 * current_n_clusters))

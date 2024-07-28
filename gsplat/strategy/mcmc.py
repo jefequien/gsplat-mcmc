@@ -11,7 +11,6 @@ from .ops import (
     relocate,
     sample_add,
     relocate_sh_clusters,
-    add_sh_clusters,
 )
 
 
@@ -145,25 +144,17 @@ class MCMCStrategy(Strategy):
 
             torch.cuda.empty_cache()
 
-        if (
-            step <= self.refine_stop_iter
-            and step >= 2000
-            and step % self.refine_every == 0
-        ):
-            # relocate sh clusters
-            n_relocated_sh_clusters = self._relocate_sh_clusters(params, optimizers)
-            if self.verbose:
-                print(f"Step {step}: Relocated {n_relocated_sh_clusters} SH clusters. ")
+        # if (
+        #     step <= self.refine_stop_iter
+        #     and step >= 2000
+        #     and step % self.refine_every == 0
+        # ):
+        #     # relocate sh clusters
+        #     n_relocated_sh_clusters = self._relocate_sh_clusters(params, optimizers)
+        #     if self.verbose:
+        #         print(f"Step {step}: Relocated {n_relocated_sh_clusters} SH clusters. ")
 
-            # add new sh clusters
-            n_new_sh_clusters = self._add_sh_clusters(params, optimizers)
-            if self.verbose:
-                print(
-                    f"Step {step}: Added {n_new_sh_clusters} SH clusters. "
-                    f"Now having {len(params['shN_codebook'])} SH clusters."
-                )
-
-            torch.cuda.empty_cache()
+        #     torch.cuda.empty_cache()
 
         # add noise to GSs
         inject_noise_to_position(
@@ -220,7 +211,7 @@ class MCMCStrategy(Strategy):
         optimizers: Dict[str, torch.optim.Optimizer],
     ) -> int:
         current_n_clusters = len(params["shN_codebook"])
-        dead_mask = params["shN_codebook"].reshape(current_n_clusters, -1).abs().max(dim=-1)[0] < 0.05
+        dead_mask = params["shN_codebook"].reshape(current_n_clusters, -1).abs().max(dim=-1)[0] < 0.01
         n_clusters = dead_mask.sum().item()
 
         if n_clusters > 0:
@@ -228,22 +219,5 @@ class MCMCStrategy(Strategy):
                 params=params,
                 optimizers=optimizers,
                 mask=dead_mask,
-            )
-        return n_clusters
-
-    @torch.no_grad()
-    def _add_sh_clusters(
-        self,
-        params: Union[Dict[str, torch.nn.Parameter], torch.nn.ParameterDict],
-        optimizers: Dict[str, torch.optim.Optimizer],
-    ) -> int:
-        current_n_clusters = len(params["shN_codebook"])
-        n_target = min(2**16, int(1.05 * current_n_clusters))
-        n_clusters = max(0, n_target - current_n_clusters)
-        if n_clusters > 0:
-            add_sh_clusters(
-                params=params,
-                optimizers=optimizers,
-                n=n_clusters,
             )
         return n_clusters

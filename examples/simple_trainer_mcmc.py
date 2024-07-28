@@ -92,7 +92,7 @@ class Config:
     # Scale regularization
     scale_reg = 0.01
     # shN regularization
-    shN_reg = 0.01
+    shN_reg = 0.0
 
     # Start refining GSs after this iteration
     refine_start_iter: int = 500
@@ -299,12 +299,18 @@ class Runner:
             colors = colors + self.splats["colors"]
             colors = torch.sigmoid(colors)
         else:
-            # shN_indices = self.splats["shN_indices"].int()
-            # shN = torch.zeros(shN_indices.shape[0], *self.splats["shN_codebook"].shape[1:]).to(self.device)
-            # nonzero_indices = shN_indices != 0
-            # shN[nonzero_indices] = self.splats["shN_codebook"][shN_indices[nonzero_indices]]
-
             shN = self.splats["shN_codebook"][self.splats["shN_indices"].int()]
+            
+            # indices = self.splats["shN_indices"].int()
+            # shN = self.splats["shN_codebook"][indices]
+            # shN[indices == 0] = 0
+            
+            # codebook = self.splats["shN_codebook"]
+            # indices = self.splats["shN_indices"].int()
+            # nonzero_indices = indices != 0
+            # shN = torch.zeros(indices.shape[0], *codebook.shape[1:], device=self.device)
+            # shN[nonzero_indices] = codebook[indices[nonzero_indices]]
+
             colors = torch.cat([self.splats["sh0"], shN], 1)  # [N, K, 3]
 
         rasterize_mode = "antialiased" if self.cfg.antialiased else "classic"
@@ -709,6 +715,16 @@ class Runner:
 
 def main(cfg: Config):
     runner = Runner(cfg)
+
+    ckpt = torch.load("results/360_v2/3dgs_1m/garden/ckpts/ckpt_29999.pt", map_location=runner.device)
+    npz = np.load("results/360_v2/3dgs_1m+sq/garden/compress/shN.npz")
+    runner.splats["means"].data = ckpt["splats"]["means"]
+    runner.splats["scales"].data = ckpt["splats"]["scales"]
+    runner.splats["quats"].data = ckpt["splats"]["quats"]
+    runner.splats["opacities"].data = ckpt["splats"]["opacities"]
+    runner.splats["sh0"].data = ckpt["splats"]["sh0"]
+    runner.splats["shN_indices"].data = torch.tensor(npz["labels"]).float().cuda()
+    runner.splats["shN_codebook"].data = torch.tensor(npz["centroids"].reshape(-1, 15, 3)).float().cuda()
 
     if cfg.ckpt is not None:
         # run eval only
