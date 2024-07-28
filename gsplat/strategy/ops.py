@@ -238,12 +238,7 @@ def relocate(
 
     def param_fn(name: str, p: Tensor) -> Tensor:
         if name == "shN_codebook":
-            # p[dead_cluster_ids[:R]] = sampled_codebook
             return torch.nn.Parameter(p)
-        # if name == "shN_indices":
-        #     p[dead_indices] = p[sampled_idxs]
-        #     p[dead_indices[:R]] = dead_cluster_ids[:R].float()
-        #     return torch.nn.Parameter(p)
 
         if name == "opacities":
             p[sampled_idxs] = torch.logit(new_opacities)
@@ -254,7 +249,6 @@ def relocate(
 
     def optimizer_fn(name: str, key: str, v: Tensor) -> Tensor:
         if name == "shN_codebook":
-            v[sampled_codebook_indices] = 0
             return v
 
         v[sampled_idxs] = 0
@@ -327,7 +321,9 @@ def relocate_sh_clusters(
     codebook_indices, codebook_counts = torch.unique(
         params["shN_indices"], return_counts=True
     )
-    sampled_codebook_indices = codebook_indices[torch.argsort(codebook_counts)[:n]]
+    sampled_codebook_indices = codebook_indices[
+        torch.argsort(codebook_counts)[:n]
+    ].int()
 
     def param_fn(name: str, p: Tensor) -> Tensor:
         if name == "shN_codebook":
@@ -362,7 +358,9 @@ def add_sh_clusters(
     codebook_indices, codebook_counts = torch.unique(
         params["shN_indices"], return_counts=True
     )
-    sampled_codebook_indices = codebook_indices[torch.argsort(codebook_counts)[:n]]
+    sampled_codebook_indices = codebook_indices[
+        torch.argsort(codebook_counts)[:n]
+    ].int()
 
     def param_fn(name: str, p: Tensor) -> Tensor:
         if name == "shN_codebook":
