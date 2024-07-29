@@ -92,7 +92,7 @@ class Config:
     # Scale regularization
     scale_reg = 0.01
     # shN regularization
-    shN_reg = 0.0
+    shN_reg = 0.01
 
     # Start refining GSs after this iteration
     refine_start_iter: int = 500
@@ -299,19 +299,16 @@ class Runner:
             colors = colors + self.splats["colors"]
             colors = torch.sigmoid(colors)
         else:
-            shN = self.splats["shN_codebook"][self.splats["shN_indices"].int()]
-            
-            # indices = self.splats["shN_indices"].int()
-            # shN = self.splats["shN_codebook"][indices]
-            # shN[indices == 0] = 0
-            
-            # codebook = self.splats["shN_codebook"]
-            # indices = self.splats["shN_indices"].int()
-            # nonzero_indices = indices != 0
-            # shN = torch.zeros(indices.shape[0], *codebook.shape[1:], device=self.device)
-            # shN[nonzero_indices] = codebook[indices[nonzero_indices]]
+            # shN = self.splats["shN_codebook"][self.splats["shN_indices"].int()]
+
+            codebook = self.splats["shN_codebook"]
+            indices = self.splats["shN_indices"].int()
+            nonzero_indices = indices != 0
+            shN = torch.zeros(indices.shape[0], *codebook.shape[1:], device=self.device)
+            shN[nonzero_indices] = codebook[indices[nonzero_indices]]
 
             colors = torch.cat([self.splats["sh0"], shN], 1)  # [N, K, 3]
+            # colors = torch.cat([self.splats["sh0"], self.splats["shN"]], 1)  # [N, K, 3]
 
         rasterize_mode = "antialiased" if self.cfg.antialiased else "classic"
         render_colors, render_alphas, info = rasterization(
@@ -480,11 +477,6 @@ class Runner:
                 self.writer.add_scalar("train/l1loss", l1loss.item(), step)
                 self.writer.add_scalar("train/ssimloss", ssimloss.item(), step)
                 self.writer.add_scalar("train/num_GS", len(self.splats["means"]), step)
-                self.writer.add_scalar(
-                    "train/num_clusters",
-                    len(self.splats["shN_codebook"]),
-                    step,
-                )
                 self.writer.add_scalar("train/mem", mem, step)
                 if cfg.depth_loss:
                     self.writer.add_scalar("train/depthloss", depthloss.item(), step)
@@ -629,7 +621,6 @@ class Runner:
             "lpips": lpips.item(),
             "ellipse_time": ellipse_time,
             "num_GS": len(self.splats["means"]),
-            "num_clusters": len(self.splats["shN_codebook"]),
         }
         with open(f"{self.stats_dir}/val_step{step:04d}.json", "w") as f:
             json.dump(stats, f)
@@ -716,15 +707,31 @@ class Runner:
 def main(cfg: Config):
     runner = Runner(cfg)
 
-    ckpt = torch.load("results/360_v2/3dgs_1m/garden/ckpts/ckpt_29999.pt", map_location=runner.device)
-    npz = np.load("results/360_v2/3dgs_1m+sq/garden/compress/shN.npz")
-    runner.splats["means"].data = ckpt["splats"]["means"]
-    runner.splats["scales"].data = ckpt["splats"]["scales"]
-    runner.splats["quats"].data = ckpt["splats"]["quats"]
-    runner.splats["opacities"].data = ckpt["splats"]["opacities"]
-    runner.splats["sh0"].data = ckpt["splats"]["sh0"]
-    runner.splats["shN_indices"].data = torch.tensor(npz["labels"]).float().cuda()
-    runner.splats["shN_codebook"].data = torch.tensor(npz["centroids"].reshape(-1, 15, 3)).float().cuda()
+    # scene = os.path.dirname(cfg.data_dir).split("/")[-1]
+
+    # ckpt = torch.load(
+    #     f"results/360_v2/3dgs_1m+sq/{scene}/ckpts/ckpt_29999.pt",
+    #     map_location=runner.device,
+    # )
+    # npz_dict = np.load(f"results/360_v2/3dgs_1m+sq/{scene}/compress/shN.npz")
+    # with open(f"results/360_v2/3dgs_1m+sq/{scene}/compress/meta.json", "r") as f:
+    #     meta = json.load(f)
+    # centroids = npz_dict["centroids"]
+    # centroids_norm = centroids / (2**6 - 1)
+    # centroids_norm = torch.tensor(centroids_norm, dtype=torch.float32)
+    # centroids_mins = torch.tensor(meta["shN"]["mins"], dtype=torch.float32)
+    # centroids_maxs = torch.tensor(meta["shN"]["maxs"], dtype=torch.float32)
+    # centroids = centroids_norm * (centroids_maxs - centroids_mins) + centroids_mins
+    # centroids = centroids.reshape(2**16, -1, 3)
+
+    # runner.splats["means"].data = ckpt["splats"]["means"]
+    # runner.splats["scales"].data = ckpt["splats"]["scales"]
+    # runner.splats["quats"].data = ckpt["splats"]["quats"]
+    # runner.splats["opacities"].data = ckpt["splats"]["opacities"]
+    # runner.splats["sh0"].data = ckpt["splats"]["sh0"]
+    # # runner.splats["shN"].data = ckpt["splats"]["shN"]
+    # runner.splats["shN_indices"].data = torch.tensor(npz_dict["labels"]).float().cuda()
+    # runner.splats["shN_codebook"].data[:, : centroids.shape[1], :] = centroids.cuda()
 
     if cfg.ckpt is not None:
         # run eval only
