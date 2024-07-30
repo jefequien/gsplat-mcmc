@@ -11,6 +11,7 @@ from .ops import (
     relocate,
     sample_add,
     relocate_sh_clusters,
+    kmeans_sh_clusters,
 )
 
 
@@ -144,17 +145,22 @@ class MCMCStrategy(Strategy):
 
             torch.cuda.empty_cache()
 
-        if (
-            step <= self.refine_stop_iter
-            and step >= 2000
-            and step % self.refine_every == 0
-        ):
-            # relocate sh clusters
-            n_relocated_sh_clusters = self._relocate_sh_clusters(params, optimizers)
-            if self.verbose:
-                print(f"Step {step}: Relocated {n_relocated_sh_clusters} SH clusters. ")
-
+        if step == 10_000:
+            print("Running KMeans...")
+            self._kmeans_sh_clusters(params, optimizers)
             torch.cuda.empty_cache()
+
+        # if (
+        #     step <= self.refine_stop_iter
+        #     and step >= 2000
+        #     and step % self.refine_every == 0
+        # ):
+        #     # relocate sh clusters
+        #     n_relocated_sh_clusters = self._relocate_sh_clusters(params, optimizers)
+        #     if self.verbose:
+        #         print(f"Step {step}: Relocated {n_relocated_sh_clusters} SH clusters. ")
+
+        #     torch.cuda.empty_cache()
 
         # add noise to GSs
         inject_noise_to_position(
@@ -203,6 +209,17 @@ class MCMCStrategy(Strategy):
                 min_opacity=self.min_opacity,
             )
         return n_gs
+    
+    @torch.no_grad()
+    def _kmeans_sh_clusters(
+        self,
+        params: Union[Dict[str, torch.nn.Parameter], torch.nn.ParameterDict],
+        optimizers: Dict[str, torch.optim.Optimizer],
+    ) -> int:
+        kmeans_sh_clusters(
+            params=params,
+            optimizers=optimizers,
+        )
 
     @torch.no_grad()
     def _relocate_sh_clusters(

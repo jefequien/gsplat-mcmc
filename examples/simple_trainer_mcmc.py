@@ -91,8 +91,8 @@ class Config:
     opacity_reg = 0.01
     # Scale regularization
     scale_reg = 0.01
-    # shN regularization
-    shN_reg = 0.01
+    # # shN regularization
+    # shN_reg = 0.0
 
     # Start refining GSs after this iteration
     refine_start_iter: int = 500
@@ -299,13 +299,15 @@ class Runner:
             colors = colors + self.splats["colors"]
             colors = torch.sigmoid(colors)
         else:
-            # shN = self.splats["shN_codebook"][self.splats["shN_indices"].int()]
+            shN = self.splats["shN_codebook"][self.splats["shN_indices"].int()]
+            
+            # print(self.splats["shN_codebook"].shape, self.splats["shN_indices"].max())
 
-            codebook = self.splats["shN_codebook"]
-            indices = self.splats["shN_indices"].int()
-            nonzero_indices = indices != 0
-            shN = torch.zeros(indices.shape[0], *codebook.shape[1:], device=self.device)
-            shN[nonzero_indices] = codebook[indices[nonzero_indices]]
+            # codebook = self.splats["shN_codebook"]
+            # indices = self.splats["shN_indices"].int()
+            # nonzero_indices = indices != 0
+            # shN = torch.zeros(indices.shape[0], *codebook.shape[1:], device=self.device)
+            # shN[nonzero_indices] = codebook[indices[nonzero_indices]]
 
             colors = torch.cat([self.splats["sh0"], shN], 1)  # [N, K, 3]
             # colors = torch.cat([self.splats["sh0"], self.splats["shN"]], 1)  # [N, K, 3]
@@ -458,7 +460,7 @@ class Runner:
                 loss
                 + cfg.scale_reg * torch.abs(torch.exp(self.splats["scales"])).mean()
             )
-            loss += cfg.shN_reg * torch.abs(self.splats["shN_codebook"]).mean()
+            # loss += cfg.shN_reg * torch.abs(self.splats["shN_codebook"]).mean()
 
             loss.backward()
 

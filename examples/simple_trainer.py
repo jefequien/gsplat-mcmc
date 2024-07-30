@@ -199,11 +199,11 @@ def create_splats_with_optimizers(
         colors[:, 0, :] = rgb_to_sh(rgbs)
         params.append(("sh0", torch.nn.Parameter(colors[:, :1, :]), 2.5e-3))
         # params.append(("shN", torch.nn.Parameter(colors[:, 1:, :]), 2.5e-3 / 20))
-        params.append(("shN_indices", torch.linspace(0, 2**16 - 1, N).round(), 0.0))
+        params.append(("shN_indices", torch.linspace(0, N - 1, N).round(), 0.0))
         params.append(
             (
                 "shN_codebook",
-                torch.nn.Parameter(torch.zeros(2**16, K - 1, 3)),
+                torch.nn.Parameter(torch.zeros(N, K - 1, 3)),
                 2.5e-3 / 20,
             )
         )
