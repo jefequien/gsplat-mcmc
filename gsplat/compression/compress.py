@@ -7,7 +7,7 @@ import torch.nn.functional as F
 import numpy as np
 import imageio
 
-from gsplat.utils import sh_to_rgb, rgb_to_sh, log_transform, inverse_log_transform
+from gsplat.utils import log_transform, inverse_log_transform
 
 
 def compress_splats(
