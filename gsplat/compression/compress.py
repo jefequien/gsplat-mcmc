@@ -105,7 +105,7 @@ def sort_splats(splats: dict[str, Tensor], verbose: bool = True) -> dict[str, Te
     n_sidelen = int(n_gs**0.5)
     assert n_sidelen**2 == n_gs, "Must be a perfect square"
 
-    sort_keys = [k for k in splats if k != "shN"]
+    sort_keys = [k for k, v in splats.items() if len(v) == n_gs]
     params_to_sort = torch.cat([splats[k].reshape(n_gs, -1) for k in sort_keys], dim=-1)
     shuffled_indices = torch.randperm(
         params_to_sort.shape[0], device=params_to_sort.device
@@ -118,7 +118,8 @@ def sort_splats(splats: dict[str, Tensor], verbose: bool = True) -> dict[str, Te
     sorted_indices = sorted_indices.squeeze().flatten()
     sorted_indices = shuffled_indices[sorted_indices]
     for k, v in splats.items():
-        splats[k] = v[sorted_indices]
+        if len(v) == n_gs:
+            splats[k] = v[sorted_indices]
     return splats
 
 
@@ -273,27 +274,32 @@ def _compress_sh0(compress_dir: str, params: Tensor) -> dict[str, Any]:
     n_sidelen = int(n_gs**0.5)
     assert n_sidelen**2 == n_gs, "Must be a perfect square"
 
-    rgb = sh_to_rgb(params)
-    rgb = torch.clamp(rgb, 0.0, 1.0)
-    grid = rgb.reshape((n_sidelen, n_sidelen, -1))
-    grid = grid.detach().cpu().numpy()
-    img = (grid * (2**8 - 1)).round().astype(np.uint8)
+    grid = params.reshape((n_sidelen, n_sidelen, -1))
+    mins = torch.amin(grid, dim=(0, 1))
+    maxs = torch.amax(grid, dim=(0, 1))
+    grid_norm = (grid - mins) / (maxs - mins)
+    img_norm = grid_norm.detach().cpu().numpy()
+    img = (img_norm * (2**8 - 1)).round().astype(np.uint8)
     imageio.imwrite(os.path.join(compress_dir, "sh0.png"), img)
 
     meta = {
         "shape": list(params.shape),
         "dtype": str(params.dtype).split(".")[1],
+        "mins": mins.tolist(),
+        "maxs": maxs.tolist(),
     }
     return meta
 
 
 def _decompress_sh0(compress_dir: str, meta: dict[str, Any]) -> Tensor:
     img = imageio.imread(os.path.join(compress_dir, "sh0.png"))
-    grid = img / (2**8 - 1)
-    grid = torch.tensor(grid)
-    params = rgb_to_sh(grid)
+    img_norm = img / (2**8 - 1)
+    grid_norm = torch.tensor(img_norm)
+    mins = torch.tensor(meta["mins"])
+    maxs = torch.tensor(meta["maxs"])
+    grid = grid_norm * (maxs - mins) + mins
 
-    params = params.reshape(meta["shape"])
+    params = grid.reshape(meta["shape"])
     params = params.to(dtype=getattr(torch, meta["dtype"]))
     return params
 
@@ -376,6 +382,59 @@ def _decompress_shN(compress_dir: str, meta: dict[str, Any]) -> Tensor:
     if "labels" in npz_dict:
         labels = npz_dict["labels"]
         params = params[labels]
+    params = params.reshape(meta["shape"])
+    params = params.to(dtype=getattr(torch, meta["dtype"]))
+    return params
+
+
+def _compress_shN_codebook(compress_dir: str, params: Tensor) -> dict[str, Any]:
+    mins = torch.min(params)
+    maxs = torch.max(params)
+    params_norm = (params - mins) / (maxs - mins)
+    params_norm = params_norm.detach().cpu().numpy()
+    params_quant = (params_norm * (2**6 - 1)).round().astype(np.uint8)
+
+    npz_dict = {"params": params_quant}
+    np.savez_compressed(os.path.join(compress_dir, "shN_codebook.npz"), **npz_dict)
+    meta = {
+        "shape": list(params.shape),
+        "dtype": str(params.dtype).split(".")[1],
+        "mins": mins.tolist(),
+        "maxs": maxs.tolist(),
+    }
+    return meta
+
+
+def _decompress_shN_codebook(compress_dir: str, meta: dict[str, Any]) -> Tensor:
+    npz_dict = np.load(os.path.join(compress_dir, "shN_codebook.npz"))
+    params_quant = npz_dict["params"]
+
+    params_norm = params_quant / (2**6 - 1)
+    params_norm = torch.tensor(params_norm)
+    mins = torch.tensor(meta["mins"])
+    maxs = torch.tensor(meta["maxs"])
+    params = params_norm * (maxs - mins) + mins
+
+    params = params.reshape(meta["shape"])
+    params = params.to(dtype=getattr(torch, meta["dtype"]))
+    return params
+
+
+def _compress_shN_indices(compress_dir: str, params: Tensor) -> dict[str, Any]:
+    arr = params.detach().cpu().numpy()
+    arr = arr.astype(np.uint16)
+    npz_dict = {"arr": arr}
+    np.savez_compressed(os.path.join(compress_dir, "shN_indices.npz"), **npz_dict)
+    meta = {
+        "shape": params.shape,
+        "dtype": str(params.dtype).split(".")[1],
+    }
+    return meta
+
+
+def _decompress_shN_indices(compress_dir: str, meta: dict[str, Any]) -> Tensor:
+    arr = np.load(os.path.join(compress_dir, "shN_indices.npz"))["arr"]
+    params = torch.tensor(arr)
     params = params.reshape(meta["shape"])
     params = params.to(dtype=getattr(torch, meta["dtype"]))
     return params

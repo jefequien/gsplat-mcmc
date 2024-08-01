@@ -94,8 +94,6 @@ class Config:
     opacity_reg = 0.01
     # Scale regularization
     scale_reg = 0.01
-    # # shN regularization
-    # shN_reg = 0.0
 
     # Start refining GSs after this iteration
     refine_start_iter: int = 500
@@ -463,7 +461,6 @@ class Runner:
                 loss
                 + cfg.scale_reg * torch.abs(torch.exp(self.splats["scales"])).mean()
             )
-            # loss += cfg.shN_reg * torch.abs(self.splats["shN_codebook"]).mean()
 
             loss.backward()
 
@@ -731,31 +728,6 @@ class Runner:
 def main(cfg: Config):
     runner = Runner(cfg)
 
-    scene = os.path.dirname(cfg.data_dir).split("/")[-1]
-
-    ckpt = torch.load(
-        f"results/360_v2/3dgs_1m/{scene}/ckpts/ckpt_29999.pt",
-        map_location=runner.device,
-    )
-    npz_dict = np.load(f"results/360_v2/3dgs_1m/{scene}/compression/shN.npz")
-    with open(f"results/360_v2/3dgs_1m/{scene}/compression/meta.json", "r") as f:
-        meta = json.load(f)
-    centroids = npz_dict["params"]
-    centroids_norm = centroids / (2**6 - 1)
-    centroids_norm = torch.tensor(centroids_norm, dtype=torch.float32)
-    centroids_mins = torch.tensor(meta["shN"]["mins"], dtype=torch.float32)
-    centroids_maxs = torch.tensor(meta["shN"]["maxs"], dtype=torch.float32)
-    centroids = centroids_norm * (centroids_maxs - centroids_mins) + centroids_mins
-    centroids = centroids.reshape(2**16, -1, 3)
-
-    runner.splats["means"].data = ckpt["splats"]["means"]
-    runner.splats["scales"].data = ckpt["splats"]["scales"]
-    runner.splats["quats"].data = ckpt["splats"]["quats"]
-    runner.splats["opacities"].data = ckpt["splats"]["opacities"]
-    runner.splats["sh0"].data = ckpt["splats"]["sh0"]
-    runner.splats["shN_indices"].data = torch.tensor(npz_dict["labels"]).float().cuda()
-    runner.splats["shN_codebook"].data[:, : centroids.shape[1], :] = centroids.cuda()
-
     if cfg.ckpt is not None:
         # run eval only
         ckpt = torch.load(cfg.ckpt, map_location=runner.device)
@@ -766,6 +738,33 @@ def main(cfg: Config):
         if cfg.compress:
             runner.run_compression(step=ckpt["step"])
     else:
+        scene = os.path.dirname(cfg.data_dir).split("/")[-1]
+        ckpt = torch.load(
+            f"results/360_v2/3dgs_1m/{scene}/ckpts/ckpt_29999.pt",
+            map_location=runner.device,
+        )
+        npz_dict = np.load(f"results/360_v2/3dgs_1m/{scene}/compression/shN.npz")
+        with open(f"results/360_v2/3dgs_1m/{scene}/compression/meta.json", "r") as f:
+            meta = json.load(f)
+        centroids = npz_dict["params"]
+        centroids_norm = centroids / (2**6 - 1)
+        centroids_norm = torch.tensor(centroids_norm, dtype=torch.float32)
+        centroids_mins = torch.tensor(meta["shN"]["mins"], dtype=torch.float32)
+        centroids_maxs = torch.tensor(meta["shN"]["maxs"], dtype=torch.float32)
+        centroids = centroids_norm * (centroids_maxs - centroids_mins) + centroids_mins
+        centroids = centroids.reshape(2**16, -1, 3)
+
+        runner.splats["means"].data = ckpt["splats"]["means"]
+        runner.splats["scales"].data = ckpt["splats"]["scales"]
+        runner.splats["quats"].data = ckpt["splats"]["quats"]
+        runner.splats["opacities"].data = ckpt["splats"]["opacities"]
+        runner.splats["sh0"].data = ckpt["splats"]["sh0"]
+        runner.splats["shN_indices"].data = (
+            torch.tensor(npz_dict["labels"]).float().cuda()
+        )
+        runner.splats["shN_codebook"].data[
+            :, : centroids.shape[1], :
+        ] = centroids.cuda()
         runner.train()
 
     if not cfg.disable_viewer:
