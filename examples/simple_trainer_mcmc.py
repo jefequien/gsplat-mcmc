@@ -303,7 +303,7 @@ class Runner:
             colors = torch.sigmoid(colors)
         else:
             shN = self.splats["shN_codebook"][self.splats["shN_indices"].int()]
-            
+
             # print(self.splats["shN_codebook"].shape, self.splats["shN_indices"].max())
 
             # codebook = self.splats["shN_codebook"]
@@ -621,7 +621,7 @@ class Runner:
         print(
             f"PSNR: {psnr.item():.3f}, SSIM: {ssim.item():.4f}, LPIPS: {lpips.item():.3f} "
             f"Time: {ellipse_time:.3f}s/image "
-            f"Number of GS: {len(self.splats['means'])} "
+            f"Number of GS: {len(self.splats['means'])}"
         )
         # save stats as json
         stats = {
@@ -731,31 +731,30 @@ class Runner:
 def main(cfg: Config):
     runner = Runner(cfg)
 
-    # scene = os.path.dirname(cfg.data_dir).split("/")[-1]
+    scene = os.path.dirname(cfg.data_dir).split("/")[-1]
 
-    # ckpt = torch.load(
-    #     f"results/360_v2/3dgs_1m+sq/{scene}/ckpts/ckpt_29999.pt",
-    #     map_location=runner.device,
-    # )
-    # npz_dict = np.load(f"results/360_v2/3dgs_1m+sq/{scene}/compress/shN.npz")
-    # with open(f"results/360_v2/3dgs_1m+sq/{scene}/compress/meta.json", "r") as f:
-    #     meta = json.load(f)
-    # centroids = npz_dict["centroids"]
-    # centroids_norm = centroids / (2**6 - 1)
-    # centroids_norm = torch.tensor(centroids_norm, dtype=torch.float32)
-    # centroids_mins = torch.tensor(meta["shN"]["mins"], dtype=torch.float32)
-    # centroids_maxs = torch.tensor(meta["shN"]["maxs"], dtype=torch.float32)
-    # centroids = centroids_norm * (centroids_maxs - centroids_mins) + centroids_mins
-    # centroids = centroids.reshape(2**16, -1, 3)
+    ckpt = torch.load(
+        f"results/360_v2/3dgs_1m/{scene}/ckpts/ckpt_29999.pt",
+        map_location=runner.device,
+    )
+    npz_dict = np.load(f"results/360_v2/3dgs_1m/{scene}/compression/shN.npz")
+    with open(f"results/360_v2/3dgs_1m/{scene}/compression/meta.json", "r") as f:
+        meta = json.load(f)
+    centroids = npz_dict["params"]
+    centroids_norm = centroids / (2**6 - 1)
+    centroids_norm = torch.tensor(centroids_norm, dtype=torch.float32)
+    centroids_mins = torch.tensor(meta["shN"]["mins"], dtype=torch.float32)
+    centroids_maxs = torch.tensor(meta["shN"]["maxs"], dtype=torch.float32)
+    centroids = centroids_norm * (centroids_maxs - centroids_mins) + centroids_mins
+    centroids = centroids.reshape(2**16, -1, 3)
 
-    # runner.splats["means"].data = ckpt["splats"]["means"]
-    # runner.splats["scales"].data = ckpt["splats"]["scales"]
-    # runner.splats["quats"].data = ckpt["splats"]["quats"]
-    # runner.splats["opacities"].data = ckpt["splats"]["opacities"]
-    # runner.splats["sh0"].data = ckpt["splats"]["sh0"]
-    # # runner.splats["shN"].data = ckpt["splats"]["shN"]
-    # runner.splats["shN_indices"].data = torch.tensor(npz_dict["labels"]).float().cuda()
-    # runner.splats["shN_codebook"].data[:, : centroids.shape[1], :] = centroids.cuda()
+    runner.splats["means"].data = ckpt["splats"]["means"]
+    runner.splats["scales"].data = ckpt["splats"]["scales"]
+    runner.splats["quats"].data = ckpt["splats"]["quats"]
+    runner.splats["opacities"].data = ckpt["splats"]["opacities"]
+    runner.splats["sh0"].data = ckpt["splats"]["sh0"]
+    runner.splats["shN_indices"].data = torch.tensor(npz_dict["labels"]).float().cuda()
+    runner.splats["shN_codebook"].data[:, : centroids.shape[1], :] = centroids.cuda()
 
     if cfg.ckpt is not None:
         # run eval only

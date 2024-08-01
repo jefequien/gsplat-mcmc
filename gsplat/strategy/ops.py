@@ -34,10 +34,6 @@ def _update_param_with_optimizer(
         names = list(params.keys())
 
     for name in names:
-        # if name == "shN_indices" or name == "shN_codebook":
-        #     params[name] = param_fn(name, params[name])
-        #     continue
-
         optimizer = optimizers[name]
         for i, param_group in enumerate(optimizer.param_groups):
             p = param_group["params"][0]
@@ -286,10 +282,6 @@ def sample_add(
 
     def param_fn(name: str, p: Tensor) -> Tensor:
         if name == "shN_codebook":
-            p = torch.cat([p, p[sampled_idxs]])
-            return torch.nn.Parameter(p)
-        if name == "shN_indices":
-            p = torch.cat([p, torch.arange(p.shape[0], p.shape[0]+ n, device=p.device)])
             return torch.nn.Parameter(p)
 
         if name == "opacities":
@@ -300,8 +292,8 @@ def sample_add(
         return torch.nn.Parameter(p)
 
     def optimizer_fn(name: str, key: str, v: Tensor) -> Tensor:
-        # if name == "shN_codebook":
-        #     return v
+        if name == "shN_codebook":
+            return v
 
         v_new = torch.zeros((len(sampled_idxs), *v.shape[1:]), device=v.device)
         return torch.cat([v, v_new])
@@ -322,9 +314,11 @@ def relocate_sh_clusters(
 ):
     dead_codebook_indices = mask.nonzero(as_tuple=True)[0]
     n = len(dead_codebook_indices)
-    
+
     codebook_size = len(params["shN_codebook"])
-    codebook_counts = torch.bincount(params["shN_indices"].int(), minlength=codebook_size)
+    codebook_counts = torch.bincount(
+        params["shN_indices"].int(), minlength=codebook_size
+    )
     print("Zero cluster size", codebook_counts[0])
 
     sampled_codebook_indices = (
@@ -348,7 +342,7 @@ def relocate_sh_clusters(
             indices = p.int()
             for idx_d in dead_codebook_indices:
                 p[indices == idx_d] = 0
-                
+
             for idx_d, idx_s in zip(dead_codebook_indices, sampled_codebook_indices):
                 p[indices == idx_d] = 0
 
@@ -366,8 +360,8 @@ def relocate_sh_clusters(
 
     # update the parameters and the state in the optimizers
     _update_param_with_optimizer(param_fn, optimizer_fn, params, optimizers)
-    
-    
+
+
 @torch.no_grad()
 def kmeans_sh_clusters(
     params: Union[Dict[str, torch.nn.Parameter], torch.nn.ParameterDict],
@@ -393,6 +387,7 @@ def kmeans_sh_clusters(
 
     # update the parameters and the state in the optimizers
     _update_param_with_optimizer(param_fn, optimizer_fn, params, optimizers)
+
 
 @torch.no_grad()
 def inject_noise_to_position(

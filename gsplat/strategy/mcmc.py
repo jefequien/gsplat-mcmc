@@ -145,10 +145,10 @@ class MCMCStrategy(Strategy):
 
             torch.cuda.empty_cache()
 
-        if step == 10_000:
-            print("Running KMeans...")
-            self._kmeans_sh_clusters(params, optimizers)
-            torch.cuda.empty_cache()
+        # if step == 10_000:
+        #     print("Running KMeans...")
+        #     self._kmeans_sh_clusters(params, optimizers)
+        #     torch.cuda.empty_cache()
 
         # if (
         #     step <= self.refine_stop_iter
@@ -209,7 +209,7 @@ class MCMCStrategy(Strategy):
                 min_opacity=self.min_opacity,
             )
         return n_gs
-    
+
     @torch.no_grad()
     def _kmeans_sh_clusters(
         self,

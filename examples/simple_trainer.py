@@ -207,7 +207,7 @@ def create_splats_with_optimizers(
         params.append(
             (
                 "shN_codebook",
-                torch.nn.Parameter(torch.zeros(N, K - 1, 3)),
+                torch.nn.Parameter(torch.zeros(2**16, K - 1, 3)),
                 2.5e-3 / 20,
             )
         )
