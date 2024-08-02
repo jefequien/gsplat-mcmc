@@ -33,6 +33,8 @@ class PngCompressionStrategy:
             "opacities": _compress_png,
             "sh0": _compress_png,
             "shN": _compress_kmeans,
+            "shN_indices": _compress_shN_indices,
+            "shN_codebook": _compress_shN_codebook,
         }
         if param_name in compress_fn_map:
             return compress_fn_map[param_name]
@@ -40,13 +42,15 @@ class PngCompressionStrategy:
             return _compress_npz
 
     def get_decompress_fn(self, param_name: str) -> Callable:
-        decompress_fn_map: dict[str, Callable] = {
+        decompress_fn_map = {
             "means": _decompress_png_16bit,
             "scales": _decompress_png,
             "quats": _decompress_png,
             "opacities": _decompress_png,
             "sh0": _decompress_png,
             "shN": _decompress_kmeans,
+            "shN_indices": _decompress_shN_indices,
+            "shN_codebook": _decompress_shN_codebook,
         }
         if param_name in decompress_fn_map:
             return decompress_fn_map[param_name]
@@ -99,10 +103,12 @@ class PngCompressionStrategy:
 
 
 def _crop_n_splats(splats: dict[str, Tensor], n_crop: int) -> dict[str, Tensor]:
+    n_gs = len(splats["means"])
     opacities = splats["opacities"]
     keep_indices = torch.argsort(opacities, descending=True)[:-n_crop]
     for k, v in splats.items():
-        splats[k] = v[keep_indices]
+        if len(v) == n_gs:
+            splats[k] = v[keep_indices]
     return splats
 
 
