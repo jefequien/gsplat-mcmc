@@ -1,1 +1,1 @@
-from .compress import compress_splats, decompress_splats
+from .png_compression import PngCompressionStrategy
