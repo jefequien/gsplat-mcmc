@@ -31,7 +31,8 @@ def compress_splats(
         opacities = splats["opacities"]
         keep_indices = torch.argsort(opacities, descending=True)[:-n_diff]
         for k, v in splats.items():
-            splats[k] = v[keep_indices]
+            if len(v) == n_gs:
+                splats[k] = v[keep_indices]
         print(
             f"Warning: Number of Gaussians was not square. Removed {n_diff} Gaussians."
         )
@@ -105,11 +106,9 @@ def sort_splats(splats: dict[str, Tensor], verbose: bool = True) -> dict[str, Te
     n_sidelen = int(n_gs**0.5)
     assert n_sidelen**2 == n_gs, "Must be a perfect square"
 
-    sort_keys = [k for k, v in splats.items() if len(v) == n_gs]
+    sort_keys = [k for k in splats.keys() if "shN" not in k]
     params_to_sort = torch.cat([splats[k].reshape(n_gs, -1) for k in sort_keys], dim=-1)
-    shuffled_indices = torch.randperm(
-        params_to_sort.shape[0], device=params_to_sort.device
-    )
+    shuffled_indices = torch.randperm(n_gs, device=params_to_sort.device)
     params_to_sort = params_to_sort[shuffled_indices]
     grid = params_to_sort.reshape((n_sidelen, n_sidelen, -1))
     _, sorted_indices = sort_with_plas(

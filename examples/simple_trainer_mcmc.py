@@ -740,11 +740,11 @@ def main(cfg: Config):
     else:
         scene = os.path.dirname(cfg.data_dir).split("/")[-1]
         ckpt = torch.load(
-            f"results/360_v2/3dgs_1m/{scene}/ckpts/ckpt_29999.pt",
+            f"results/360_v2/3dgs_0.5m/{scene}/ckpts/ckpt_29999.pt",
             map_location=runner.device,
         )
-        npz_dict = np.load(f"results/360_v2/3dgs_1m/{scene}/compression/shN.npz")
-        with open(f"results/360_v2/3dgs_1m/{scene}/compression/meta.json", "r") as f:
+        npz_dict = np.load(f"results/360_v2/3dgs_0.5m/{scene}/compression/shN.npz")
+        with open(f"results/360_v2/3dgs_0.5m/{scene}/compression/meta.json", "r") as f:
             meta = json.load(f)
         centroids = npz_dict["params"]
         centroids_norm = centroids / (2**6 - 1)
