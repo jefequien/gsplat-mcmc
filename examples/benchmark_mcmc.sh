@@ -1,6 +1,6 @@
 SCENE_DIR="data/360_v2"
 RESULTS_DIR="results/360_v2"
-SCENE_LIST="garden bicycle stump bonsai counter kitchen room" # treehill flowers
+SCENE_LIST="garden" # treehill flowers bicycle stump bonsai counter kitchen room
 
 for SCENE in $SCENE_LIST;
 do
@@ -12,7 +12,7 @@ do
         DATA_FACTOR=4
     fi
 
-    CAP_MAX=500000
+    CAP_MAX=1000000
     MAX_STEPS=30000
     EVAL_STEPS="2000 7000 15000 30000"
     SAVE_STEPS="7000 30000"
@@ -24,13 +24,13 @@ do
     #     --data_dir $SCENE_DIR/$SCENE/ \
     #     --compression_strategy png \
     #     --sh_degree 5 \
-    #     --result_dir $RESULTS_DIR/3dgs_0.5m_finetune_sh5/$SCENE/
+    #     --result_dir $RESULTS_DIR/3dgs_1m_finetune_sh5/$SCENE/
 
     python simple_trainer_mcmc.py --disable_viewer --data_factor $DATA_FACTOR \
         --data_dir $SCENE_DIR/$SCENE/ \
         --compression_strategy png \
         --sh_degree 5 \
-        --ckpt $RESULTS_DIR/3dgs_0.5m_finetune_sh5/$SCENE/ckpts/ckpt_29999.pt \
-        --result_dir $RESULTS_DIR/3dgs_0.5m_finetune_sh5/$SCENE/
+        --ckpt $RESULTS_DIR/3dgs_1m_finetune_sh5/$SCENE/ckpts/ckpt_29999.pt \
+        --result_dir $RESULTS_DIR/3dgs_1m_finetune_sh5/$SCENE/
 
 done

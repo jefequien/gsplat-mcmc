@@ -744,13 +744,14 @@ def main(cfg: Config):
         if cfg.compression_strategy is not None:
             runner.run_compression(step=ckpt["step"])
     else:
+        ori_dir = "results/360_v2/3dgs_1m"
         scene = os.path.dirname(cfg.data_dir).split("/")[-1]
         ckpt = torch.load(
-            f"results/360_v2/3dgs_0.5m/{scene}/ckpts/ckpt_29999.pt",
+            f"{ori_dir}/{scene}/ckpts/ckpt_29999.pt",
             map_location=runner.device,
         )
-        npz_dict = np.load(f"results/360_v2/3dgs_0.5m/{scene}/compression/shN.npz")
-        with open(f"results/360_v2/3dgs_0.5m/{scene}/compression/meta.json", "r") as f:
+        npz_dict = np.load(f"{ori_dir}/{scene}/compression/shN.npz")
+        with open(f"{ori_dir}/{scene}/compression/meta.json", "r") as f:
             meta = json.load(f)
         centroids = npz_dict["centroids"]
         centroids_norm = centroids / (2**6 - 1)
