@@ -752,7 +752,7 @@ def main(cfg: Config):
         npz_dict = np.load(f"results/360_v2/3dgs_0.5m/{scene}/compression/shN.npz")
         with open(f"results/360_v2/3dgs_0.5m/{scene}/compression/meta.json", "r") as f:
             meta = json.load(f)
-        centroids = npz_dict["params"]
+        centroids = npz_dict["centroids"]
         centroids_norm = centroids / (2**6 - 1)
         centroids_norm = torch.tensor(centroids_norm, dtype=torch.float32)
         centroids_mins = torch.tensor(meta["shN"]["mins"], dtype=torch.float32)

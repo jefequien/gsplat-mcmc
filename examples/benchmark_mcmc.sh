@@ -22,13 +22,13 @@ do
     #     --cap_max $CAP_MAX \
     #     --max_steps $MAX_STEPS \
     #     --data_dir $SCENE_DIR/$SCENE/ \
-    #     --compress \
+    #     --compression_strategy png \
     #     --sh_degree 5 \
     #     --result_dir $RESULTS_DIR/3dgs_0.5m_finetune_sh5/$SCENE/
 
     python simple_trainer_mcmc.py --disable_viewer --data_factor $DATA_FACTOR \
         --data_dir $SCENE_DIR/$SCENE/ \
-        --compress \
+        --compression_strategy png \
         --sh_degree 5 \
         --ckpt $RESULTS_DIR/3dgs_0.5m_finetune_sh5/$SCENE/ckpts/ckpt_29999.pt \
         --result_dir $RESULTS_DIR/3dgs_0.5m_finetune_sh5/$SCENE/
