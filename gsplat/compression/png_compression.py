@@ -281,6 +281,72 @@ def _decompress_npz(compress_dir: str, param_name: str, meta: dict[str, Any]) ->
     return params
 
 
+def _compress_shN_indices(
+    compress_dir: str, param_name: str, params: Tensor, **kwargs
+) -> dict[str, Any]:
+    """Compress parameters with numpy's NPZ compression."""
+    arr = params.detach().cpu().numpy()
+    arr = arr.astype(np.uint16)
+    npz_dict = {"arr": arr}
+    np.savez_compressed(os.path.join(compress_dir, f"{param_name}.npz"), **npz_dict)
+    meta = {
+        "shape": params.shape,
+        "dtype": str(params.dtype).split(".")[1],
+    }
+    return meta
+
+
+def _decompress_shN_indices(
+    compress_dir: str, param_name: str, meta: dict[str, Any]
+) -> Tensor:
+    """Decompress parameters with numpy's NPZ compression."""
+    arr = np.load(os.path.join(compress_dir, f"{param_name}.npz"))["arr"]
+    params = torch.tensor(arr)
+    params = params.reshape(meta["shape"])
+    params = params.to(dtype=getattr(torch, meta["dtype"]))
+    return params
+
+
+def _compress_shN_codebook(
+    compress_dir: str, param_name: str, params: Tensor, quantization: int = 6, **kwargs
+) -> dict[str, Any]:
+    """Compress parameters with numpy's NPZ compression."""
+    mins = torch.min(params)
+    maxs = torch.max(params)
+    params_norm = (params - mins) / (maxs - mins)
+    params_norm = params_norm.detach().cpu().numpy()
+    params_quant = (params_norm * (2**quantization - 1)).round().astype(np.uint8)
+
+    npz_dict = {"arr": params_quant}
+    np.savez_compressed(os.path.join(compress_dir, f"{param_name}.npz"), **npz_dict)
+    meta = {
+        "shape": params.shape,
+        "dtype": str(params.dtype).split(".")[1],
+        "mins": mins.tolist(),
+        "maxs": maxs.tolist(),
+        "quantization": quantization,
+    }
+    return meta
+
+
+def _decompress_shN_codebook(
+    compress_dir: str, param_name: str, meta: dict[str, Any]
+) -> Tensor:
+    """Decompress parameters with numpy's NPZ compression."""
+    npz_dict = np.load(os.path.join(compress_dir, f"{param_name}.npz"))
+    params_quant = npz_dict["arr"]
+
+    params_norm = params_quant / (2 ** meta["quantization"] - 1)
+    params_norm = torch.tensor(params_norm)
+    mins = torch.tensor(meta["mins"])
+    maxs = torch.tensor(meta["maxs"])
+    params = params_norm * (maxs - mins) + mins
+
+    params = params.reshape(meta["shape"])
+    params = params.to(dtype=getattr(torch, meta["dtype"]))
+    return params
+
+
 def _compress_kmeans(
     compress_dir: str,
     param_name: str,
