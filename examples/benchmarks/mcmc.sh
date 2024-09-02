@@ -8,9 +8,14 @@
 # SCENE_LIST="chinesearch lionpavilion pondbike statue strat building"
 # RENDER_TRAJ_PATH="spiral"
 
-SCENE_DIR="data/bilarf/bilarf_data/editscenes"
-RESULT_DIR="results/benchmark_bilarf"
-SCENE_LIST="rawnerf_windowlegovary rawnerf_sharpshadow scibldg"
+# SCENE_DIR="data/bilarf/bilarf_data/editscenes"
+# RESULT_DIR="results/benchmark_bilarf"
+# SCENE_LIST="rawnerf_windowlegovary rawnerf_sharpshadow scibldg"
+# RENDER_TRAJ_PATH="spiral"
+
+SCENE_DIR="data/shiny"
+RESULT_DIR="results/benchmark_shiny"
+SCENE_LIST="cd" # crest food giants lab pasta seasoning tools"
 RENDER_TRAJ_PATH="spiral"
 
 CAP_MAX=1000000
@@ -20,25 +25,23 @@ do
     if [ "$SCENE" = "bonsai" ] || [ "$SCENE" = "counter" ] || [ "$SCENE" = "kitchen" ] || [ "$SCENE" = "room" ]; then
         DATA_FACTOR=2
     else
-        DATA_FACTOR=4
+        DATA_FACTOR=1
     fi
 
     echo "Running $SCENE"
 
     # train without eval
-    CUDA_VISIBLE_DEVICES=0 python simple_trainer.py mcmc --disable_viewer --data_factor $DATA_FACTOR \
-        --strategy.cap-max $CAP_MAX \
-        --exp_opt \
-        --render_traj_path $RENDER_TRAJ_PATH \
-        --data_dir $SCENE_DIR/$SCENE/ \
-        --result_dir $RESULT_DIR/$SCENE/
+    # CUDA_VISIBLE_DEVICES=0 python simple_trainer.py mcmc --disable_viewer --data_factor $DATA_FACTOR \
+    #     --strategy.cap-max $CAP_MAX \
+    #     --render_traj_path $RENDER_TRAJ_PATH \
+    #     --data_dir $SCENE_DIR/$SCENE/ \
+    #     --result_dir $RESULT_DIR/$SCENE/
 
     # run eval and render
     for CKPT in $RESULT_DIR/$SCENE/ckpts/*;
     do
         CUDA_VISIBLE_DEVICES=0 python simple_trainer.py mcmc --disable_viewer --data_factor $DATA_FACTOR \
             --strategy.cap-max $CAP_MAX \
-            --exp_opt \
             --render_traj_path $RENDER_TRAJ_PATH \
             --data_dir $SCENE_DIR/$SCENE/ \
             --result_dir $RESULT_DIR/$SCENE/ \

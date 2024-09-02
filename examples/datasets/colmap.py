@@ -134,7 +134,7 @@ class Parser:
 
         # Load extended metadata. Used by Bilarf dataset.
         self.extconf = {
-            "spiral_radius_scale": 1.0,
+            "spiral_radius_scale": 0.1,
             "no_factor_suffix": False,
         }
         extconf_file = os.path.join(data_dir, "ext_metadata.json")
