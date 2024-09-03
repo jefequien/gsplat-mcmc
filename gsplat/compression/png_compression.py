@@ -51,7 +51,7 @@ class PngCompression:
             "quats": _compress_png,
             "opacities": _compress_png,
             "sh0": _compress_png,
-            "shN": _compress_kmeans,
+            # "shN": _compress_kmeans,
         }
         if param_name in compress_fn_map:
             return compress_fn_map[param_name]
@@ -65,7 +65,7 @@ class PngCompression:
             "quats": _decompress_png,
             "opacities": _decompress_png,
             "sh0": _decompress_png,
-            "shN": _decompress_kmeans,
+            # "shN": _decompress_kmeans,
         }
         if param_name in decompress_fn_map:
             return decompress_fn_map[param_name]

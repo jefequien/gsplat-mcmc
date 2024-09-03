@@ -11,7 +11,7 @@ SCENE_LIST="garden bicycle stump bonsai counter kitchen room treehill flowers"
 # CAP_MAX=490000
 
 # 1M GSs
-RESULT_DIR="results/benchmark_mcmc_1M_png_compression"
+RESULT_DIR="results/benchmark_mcmc_1M_png_compression_sh1"
 CAP_MAX=1000000
 
 # # 4M GSs
@@ -30,26 +30,28 @@ do
     echo "Running $SCENE"
 
     # train without eval
-    CUDA_VISIBLE_DEVICES=0 python simple_trainer.py mcmc --eval_steps -1 --disable_viewer --data_factor $DATA_FACTOR \
-        --strategy.cap-max $CAP_MAX \
-        --data_dir data/360_v2/$SCENE/ \
-        --result_dir $RESULT_DIR/$SCENE/
+    # CUDA_VISIBLE_DEVICES=0 python simple_trainer.py mcmc --eval_steps -1 --disable_viewer --data_factor $DATA_FACTOR \
+    #     --strategy.cap-max $CAP_MAX \
+    #     --sh_degree 1 \
+    #     --data_dir data/360_v2/$SCENE/ \
+    #     --result_dir $RESULT_DIR/$SCENE/
 
-    # eval: use vgg for lpips to align with other benchmarks
-    CUDA_VISIBLE_DEVICES=0 python simple_trainer.py mcmc --disable_viewer --data_factor $DATA_FACTOR \
-        --strategy.cap-max $CAP_MAX \
-        --data_dir data/360_v2/$SCENE/ \
-        --result_dir $RESULT_DIR/$SCENE/ \
-        --lpips_net vgg \
-        --compression png \
-        --ckpt $RESULT_DIR/$SCENE/ckpts/ckpt_29999_rank0.pt
+    # # eval: use vgg for lpips to align with other benchmarks
+    # CUDA_VISIBLE_DEVICES=0 python simple_trainer.py mcmc --disable_viewer --data_factor $DATA_FACTOR \
+    #     --strategy.cap-max $CAP_MAX \
+    #     --sh_degree 1 \
+    #     --data_dir data/360_v2/$SCENE/ \
+    #     --result_dir $RESULT_DIR/$SCENE/ \
+    #     --lpips_net vgg \
+    #     --compression png \
+    #     --ckpt $RESULT_DIR/$SCENE/ckpts/ckpt_29999_rank0.pt
 done
 
 # Zip the compressed files and summarize the stats
 if command -v zip &> /dev/null
 then
     echo "Zipping results"
-    python benchmarks/compression/summarize_stats.py --results_dir $RESULT_DIR
+    python benchmarks/compression/summarize_stats.py --results_dir $RESULT_DIR --scenes $SCENE_LIST
 else
     echo "zip command not found, skipping zipping"
 fi
