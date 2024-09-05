@@ -76,7 +76,7 @@ def _update_param_with_optimizer(
             for key in p_state.keys():
                 if key != "step":
                     v = p_state[key]
-                    p_state[key] = optimizer_fn(key, v)
+                    p_state[key] = optimizer_fn(name, key, v)
             p_new = param_fn(name, p)
             optimizer.param_groups[i]["params"] = [p_new]
             optimizer.state[p_new] = p_state
@@ -103,7 +103,7 @@ def duplicate(
     def param_fn(name: str, p: Tensor) -> Tensor:
         return torch.nn.Parameter(torch.cat([p, p[sel]]))
 
-    def optimizer_fn(key: str, v: Tensor) -> Tensor:
+    def optimizer_fn(name: str, key: str, v: Tensor) -> Tensor:
         return torch.cat([v, torch.zeros((len(sel), *v.shape[1:]), device=device)])
 
     # update the parameters and the state in the optimizers
@@ -160,7 +160,7 @@ def split(
         p_new = torch.nn.Parameter(p_new)
         return p_new
 
-    def optimizer_fn(key: str, v: Tensor) -> Tensor:
+    def optimizer_fn(name: str, key: str, v: Tensor) -> Tensor:
         v_split = torch.zeros((2 * len(sel), *v.shape[1:]), device=device)
         return torch.cat([v[rest], v_split])
 
@@ -193,7 +193,7 @@ def remove(
     def param_fn(name: str, p: Tensor) -> Tensor:
         return torch.nn.Parameter(p[sel])
 
-    def optimizer_fn(key: str, v: Tensor) -> Tensor:
+    def optimizer_fn(name: str, key: str, v: Tensor) -> Tensor:
         return v[sel]
 
     # update the parameters and the state in the optimizers
@@ -226,7 +226,7 @@ def reset_opa(
         else:
             raise ValueError(f"Unexpected parameter name: {name}")
 
-    def optimizer_fn(key: str, v: Tensor) -> Tensor:
+    def optimizer_fn(name: str, key: str, v: Tensor) -> Tensor:
         return torch.zeros_like(v)
 
     # update the parameters and the state in the optimizers
@@ -272,6 +272,9 @@ def relocate(
     new_opacities = torch.clamp(new_opacities, max=1.0 - eps, min=min_opacity)
 
     def param_fn(name: str, p: Tensor) -> Tensor:
+        if name == "shN_codebook":
+            return torch.nn.Parameter(p)
+
         if name == "opacities":
             p[sampled_idxs] = torch.logit(new_opacities)
         elif name == "scales":
@@ -279,7 +282,10 @@ def relocate(
         p[dead_indices] = p[sampled_idxs]
         return torch.nn.Parameter(p)
 
-    def optimizer_fn(key: str, v: Tensor) -> Tensor:
+    def optimizer_fn(name: str, key: str, v: Tensor) -> Tensor:
+        if name == "shN_codebook":
+            return v
+
         v[sampled_idxs] = 0
         return v
 
@@ -314,6 +320,9 @@ def sample_add(
     new_opacities = torch.clamp(new_opacities, max=1.0 - eps, min=min_opacity)
 
     def param_fn(name: str, p: Tensor) -> Tensor:
+        if name == "shN_codebook":
+            return torch.nn.Parameter(p)
+
         if name == "opacities":
             p[sampled_idxs] = torch.logit(new_opacities)
         elif name == "scales":
@@ -321,7 +330,10 @@ def sample_add(
         p = torch.cat([p, p[sampled_idxs]])
         return torch.nn.Parameter(p)
 
-    def optimizer_fn(key: str, v: Tensor) -> Tensor:
+    def optimizer_fn(name: str, key: str, v: Tensor) -> Tensor:
+        if name == "shN_codebook":
+            return v
+
         v_new = torch.zeros((len(sampled_idxs), *v.shape[1:]), device=v.device)
         return torch.cat([v, v_new])
 

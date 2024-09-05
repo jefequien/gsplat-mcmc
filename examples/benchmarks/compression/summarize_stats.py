@@ -10,7 +10,7 @@ import tyro
 
 def main(results_dir: str, scenes: List[str]):
     print("scenes:", scenes)
-    stage = "val"
+    stage = "compress"
 
     summary = defaultdict(list)
     for scene in scenes:

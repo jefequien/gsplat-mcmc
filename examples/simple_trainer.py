@@ -79,6 +79,8 @@ class Config:
     init_extent: float = 3.0
     # Degree of spherical harmonics
     sh_degree: int = 3
+    # Turn on SH degree after this step
+    sh_degree_start_iter: int = 0
     # Turn on another SH degree every this steps
     sh_degree_interval: int = 1000
     # Initial opacity of GS
@@ -211,10 +213,19 @@ def create_splats_with_optimizers(
 
     if feature_dim is None:
         # color is SH coefficients.
-        colors = torch.zeros((N, (sh_degree + 1) ** 2, 3))  # [N, K, 3]
+        K = (sh_degree + 1) ** 2
+        colors = torch.zeros((N, K, 3))  # [N, K, 3]
         colors[:, 0, :] = rgb_to_sh(rgbs)
         params.append(("sh0", torch.nn.Parameter(colors[:, :1, :]), 2.5e-3))
-        params.append(("shN", torch.nn.Parameter(colors[:, 1:, :]), 2.5e-3 / 20))
+        # params.append(("shN", torch.nn.Parameter(colors[:, 1:, :]), 2.5e-3 / 20))
+        params.append(("shN_indices", torch.linspace(0, 2**16 - 1, N).round(), 0.0))
+        params.append(
+            (
+                "shN_codebook",
+                torch.nn.Parameter(torch.zeros(2**16, K - 1, 3)),
+                2.5e-3 / 20,
+            )
+        )
     else:
         # features will be used for appearance and view-dependent shading
         features = torch.rand(N, feature_dim)  # [N, feature_dim]
@@ -419,7 +430,9 @@ class Runner:
             colors = colors + self.splats["colors"]
             colors = torch.sigmoid(colors)
         else:
-            colors = torch.cat([self.splats["sh0"], self.splats["shN"]], 1)  # [N, K, 3]
+            # colors = torch.cat([self.splats["sh0"], self.splats["shN"]], 1)  # [N, K, 3]
+            shN = self.splats["shN_codebook"][self.splats["shN_indices"].int()]
+            colors = torch.cat([self.splats["sh0"], shN], 1)  # [N, K, 3]
 
         rasterize_mode = "antialiased" if self.cfg.antialiased else "classic"
         render_colors, render_alphas, info = rasterization(
@@ -519,7 +532,13 @@ class Runner:
                 camtoworlds = self.pose_adjust(camtoworlds, image_ids)
 
             # sh schedule
-            sh_degree_to_use = min(step // cfg.sh_degree_interval, cfg.sh_degree)
+            sh_degree_to_use = max(
+                min(
+                    (step - cfg.sh_degree_start_iter) // cfg.sh_degree_interval,
+                    cfg.sh_degree,
+                ),
+                0,
+            )
 
             # forward
             renders, alphas, info = self.rasterize_splats(

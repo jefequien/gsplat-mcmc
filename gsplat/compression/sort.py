@@ -29,7 +29,7 @@ def sort_splats(splats: Dict[str, Tensor], verbose: bool = True) -> Dict[str, Te
     n_sidelen = int(n_gs**0.5)
     assert n_sidelen**2 == n_gs, "Must be a perfect square"
 
-    # sort_keys = [k for k in splats if k != "shN"]
+    # sort_keys = [k for k in splats.keys() if "shN" not in k]
     sort_keys = ["means"]
     params_to_sort = torch.cat([splats[k].reshape(n_gs, -1) for k in sort_keys], dim=-1)
     shuffled_indices = torch.randperm(
@@ -43,5 +43,7 @@ def sort_splats(splats: Dict[str, Tensor], verbose: bool = True) -> Dict[str, Te
     sorted_indices = sorted_indices.squeeze().flatten()
     sorted_indices = shuffled_indices[sorted_indices]
     for k, v in splats.items():
+        if k == "shN_codebook":
+            continue
         splats[k] = v[sorted_indices]
     return splats

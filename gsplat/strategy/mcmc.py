@@ -120,8 +120,8 @@ class MCMCStrategy(Strategy):
         binoms = state["binoms"]
 
         if (
-            step < self.refine_stop_iter
-            and step > self.refine_start_iter
+            step <= self.refine_stop_iter
+            and step >= self.refine_start_iter
             and step % self.refine_every == 0
         ):
             # teleport GSs
