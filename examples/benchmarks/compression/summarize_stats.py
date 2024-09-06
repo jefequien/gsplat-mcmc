@@ -14,7 +14,7 @@ def main(results_dir: str, scenes: List[str]):
     stages = ["val", "compress"]
 
     for stage in stages:
-        summary = defaultdict(list)
+        summary_list = defaultdict(list)
         for scene in scenes:
             scene_dir = os.path.join(results_dir, scene)
 
@@ -29,16 +29,17 @@ def main(results_dir: str, scenes: List[str]):
                     f"stat -c%s {zip_path}", shell=True, capture_output=True
                 )
                 size = int(out.stdout)
-                summary["size"].append(size)
+                summary_list["size"].append(size)
 
             with open(
                 os.path.join(scene_dir, f"stats/{stage}_step29999.json"), "r"
             ) as f:
                 stats = json.load(f)
                 for k, v in stats.items():
-                    summary[k].append(v)
+                    summary_list[k].append(v)
 
-        for k, v in summary.items():
+        summary = {"scenes": scenes}
+        for k, v in summary_list.items():
             print(stage, k, np.mean(v))
             summary[k] = np.mean(v)
 

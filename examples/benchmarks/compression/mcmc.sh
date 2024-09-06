@@ -1,6 +1,6 @@
 SCENE_DIR="data/360_v2"
 # eval all 9 scenes for benchmarking
-SCENE_LIST="garden bicycle bonsai counter kitchen room treehill flowers" # stump
+SCENE_LIST="garden bicycle stump bonsai counter kitchen room treehill flowers"
 
 # # 0.36M GSs
 # RESULT_DIR="results/benchmark_mcmc_0_36M_png_compression"
@@ -10,13 +10,13 @@ SCENE_LIST="garden bicycle bonsai counter kitchen room treehill flowers" # stump
 # RESULT_DIR="results/benchmark_mcmc_0_49M_png_compression"
 # CAP_MAX=490000
 
-# # 1M GSs
-# RESULT_DIR="results/codebook/benchmark_mcmc_1M_png_compression"
-# CAP_MAX=1000000
+# 1M GSs
+RESULT_DIR="results/codebook/benchmark_mcmc_1M_png_compression"
+CAP_MAX=1000000
 
-# 2M GSs
-RESULT_DIR="results/codebook/benchmark_mcmc_2M_png_compression"
-CAP_MAX=2000000
+# # 2M GSs
+# RESULT_DIR="results/codebook/benchmark_mcmc_2M_png_compression"
+# CAP_MAX=2000000
 
 # # 4M GSs
 # RESULT_DIR="results/codebook/benchmark_mcmc_4M_png_compression"

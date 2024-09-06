@@ -400,16 +400,14 @@ def relocate_sh_clusters(
             p[dead_codebook_indices] = p[sampled_codebook_indices]
         elif name == "shN_indices":
             indices = p.int()
-            for idx_d in dead_codebook_indices:
-                p[indices == idx_d] = 0
-
             for idx_d, idx_s in zip(dead_codebook_indices, sampled_codebook_indices):
-                p[indices == idx_d] = 0
+                indices_s = (indices == idx_s).nonzero(as_tuple=True)[0]
 
-                indices_idxs = (indices == idx_s).nonzero(as_tuple=True)[0]
-                indices_idxs_half = indices_idxs[: int(0.5 * len(indices_idxs))]
-                # indices_idxs_one = indices_idxs[: 1]
-                p[indices_idxs_half] = idx_d.float()
+                # Split cluster along x dimension
+                xs = params["means"][:, 0][indices_s]
+                indices_s_half = indices_s[torch.argsort(xs)[: len(indices_s) // 2]]
+                # indices_s_half = indices_s[: len(indices_s) // 2]
+                p[indices_s_half] = idx_d.float()
         return torch.nn.Parameter(p)
 
     def optimizer_fn(name: str, key: str, v: Tensor) -> Tensor:
