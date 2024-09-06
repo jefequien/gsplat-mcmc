@@ -12,7 +12,7 @@ RENDER_TRAJ_PATH="ellipse"
 # CAP_MAX=490000
 
 # 1M GSs
-RESULT_DIR="results/codebook/benchmark_mcmc_1M_png_compression"
+RESULT_DIR="results/codebook/benchmark_mcmc_1M_png_compression_debug"
 CAP_MAX=1000000
 
 # # 2M GSs

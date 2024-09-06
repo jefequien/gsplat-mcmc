@@ -394,19 +394,19 @@ def relocate_sh_clusters(
     n_alive = codebook_size - len(dead_codebook_indices) + n_relocated
     dead_codebook_indices = dead_codebook_indices[:n_relocated]
     sampled_codebook_indices = sampled_codebook_indices[:n_relocated]
+    axis_splits = torch.randint(3, (n_relocated,))
 
     def param_fn(name: str, p: Tensor) -> Tensor:
         if name == "shN_codebook":
             p[dead_codebook_indices] = p[sampled_codebook_indices]
         elif name == "shN_indices":
             indices = p.int()
-            for idx_d, idx_s in zip(dead_codebook_indices, sampled_codebook_indices):
+            for idx_d, idx_s, axis_split in zip(dead_codebook_indices, sampled_codebook_indices, axis_splits):
                 indices_s = (indices == idx_s).nonzero(as_tuple=True)[0]
 
-                # Split cluster along z dimension
-                xs = params["means"][:, 2][indices_s]
-                indices_s_half = indices_s[torch.argsort(xs)[: len(indices_s) // 2]]
-                # indices_s_half = indices_s[: len(indices_s) // 2]
+                # Split cluster along random axis
+                vals = params["means"][:, axis_split][indices_s]
+                indices_s_half = indices_s[torch.argsort(vals)[: len(indices_s) // 2]]
                 p[indices_s_half] = idx_d.float()
         return torch.nn.Parameter(p)
 

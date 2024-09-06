@@ -218,7 +218,8 @@ def create_splats_with_optimizers(
         colors[:, 0, :] = rgb_to_sh(rgbs)
         params.append(("sh0", torch.nn.Parameter(colors[:, :1, :]), 2.5e-3))
         # params.append(("shN", torch.nn.Parameter(colors[:, 1:, :]), 2.5e-3 / 20))
-        params.append(("shN_indices", torch.linspace(0, 2**16 - 1, N).round(), 0.0))
+        params.append(("shN_indices", torch.zeros(N), 0.0))
+        # params.append(("shN_indices", torch.linspace(0, 2**16 - 1, N).round(), 0.0))
         params.append(
             (
                 "shN_codebook",
@@ -443,18 +444,18 @@ class Runner:
             colors = torch.zeros_like(colors)
             colors[:,0,:] = self.colorbook[indices]
             
-            mask = torch.zeros(opacities.shape, dtype=bool, device=self.device)
-            mask[self.colorbook_sampled_indices] = 1
-            opacities[~mask] = 0
-            print("Nonzero", torch.count_nonzero(opacities))
+            # codebook_counts = torch.bincount(indices, minlength=2**16)
+            # sampled_codebook_indices = torch.argsort(codebook_counts, descending=True)[:10]
+            # self.colorbook_sampled_indices = []
+            # for sci in sampled_codebook_indices:
+            #     sci_indices = (indices == sci).nonzero(as_tuple=True)[0]
+            #     for sci_ind in sci_indices:
+            #         self.colorbook_sampled_indices.append(int(sci_ind))
             
-            codebook_counts = torch.bincount(indices, minlength=2**16)
-            sampled_codebook_indices = torch.argsort(codebook_counts, descending=True)[:10]
-            self.colorbook_sampled_indices = []
-            for sci in sampled_codebook_indices:
-                sci_indices = (indices == sci).nonzero(as_tuple=True)[0]
-                for sci_ind in sci_indices:
-                    self.colorbook_sampled_indices.append(int(sci_ind))
+            # mask = torch.zeros(opacities.shape, dtype=bool, device=self.device)
+            # mask[self.colorbook_sampled_indices] = 1
+            # opacities[~mask] = 0
+            # print("Nonzero", torch.count_nonzero(opacities))
 
         rasterize_mode = "antialiased" if self.cfg.antialiased else "classic"
         render_colors, render_alphas, info = rasterization(
