@@ -10,13 +10,13 @@ SCENE_LIST="garden bicycle stump bonsai counter kitchen room treehill flowers"
 # RESULT_DIR="results/benchmark_mcmc_0_49M_png_compression"
 # CAP_MAX=490000
 
-# 1M GSs
-RESULT_DIR="results/codebook/benchmark_mcmc_1M_png_compression"
-CAP_MAX=1000000
+# # 1M GSs
+# RESULT_DIR="results/codebook/benchmark_mcmc_1M_png_compression"
+# CAP_MAX=1000000
 
-# # 2M GSs
-# RESULT_DIR="results/codebook/benchmark_mcmc_2M_png_compression"
-# CAP_MAX=2000000
+# 2M GSs
+RESULT_DIR="results/codebook/benchmark_mcmc_2M_png_compression"
+CAP_MAX=2000000
 
 # # 4M GSs
 # RESULT_DIR="results/codebook/benchmark_mcmc_4M_png_compression"
