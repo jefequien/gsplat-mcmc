@@ -67,7 +67,7 @@ class Config:
     # Number of training steps
     max_steps: int = 30_000
     # Steps to evaluate the model
-    eval_steps: List[int] = field(default_factory=lambda: [7_000, 30_000])
+    eval_steps: List[int] = field(default_factory=lambda: [30_000])
     # Steps to save the model
     save_steps: List[int] = field(default_factory=lambda: [7_000, 30_000])
 
@@ -264,6 +264,9 @@ class Runner:
         self.local_rank = local_rank
         self.world_size = world_size
         self.device = f"cuda:{local_rank}"
+        self.colorbook = torch.rand((2**16, 3), device=self.device)
+        self.colorbook = rgb_to_sh(self.colorbook)
+        self.colorbook_sampled_indices = []
 
         # Where to dump results.
         os.makedirs(cfg.result_dir, exist_ok=True)
@@ -410,6 +413,7 @@ class Runner:
         Ks: Tensor,
         width: int,
         height: int,
+        debug: bool = False,
         **kwargs,
     ) -> Tuple[Tensor, Tensor, Dict]:
         means = self.splats["means"]  # [N, 3]
@@ -432,7 +436,25 @@ class Runner:
         else:
             # colors = torch.cat([self.splats["sh0"], self.splats["shN"]], 1)  # [N, K, 3]
             shN = self.splats["shN_codebook"][self.splats["shN_indices"].int()]
-            colors = torch.cat([self.splats["sh0"], shN], 1)  # [N, K, 3]
+            colors = torch.cat([self.splats["sh0"], shN], dim=1)  # [N, K, 3]
+
+        if debug:
+            indices = self.splats["shN_indices"].int()
+            colors = torch.zeros_like(colors)
+            colors[:,0,:] = self.colorbook[indices]
+            
+            mask = torch.zeros(opacities.shape, dtype=bool, device=self.device)
+            mask[self.colorbook_sampled_indices] = 1
+            opacities[~mask] = 0
+            print("Nonzero", torch.count_nonzero(opacities))
+            
+            codebook_counts = torch.bincount(indices, minlength=2**16)
+            sampled_codebook_indices = torch.argsort(codebook_counts, descending=True)[:10]
+            self.colorbook_sampled_indices = []
+            for sci in sampled_codebook_indices:
+                sci_indices = (indices == sci).nonzero(as_tuple=True)[0]
+                for sci_ind in sci_indices:
+                    self.colorbook_sampled_indices.append(int(sci_ind))
 
         rasterize_mode = "antialiased" if self.cfg.antialiased else "classic"
         render_colors, render_alphas, info = rasterization(
@@ -725,6 +747,9 @@ class Runner:
             if step in [i - 1 for i in cfg.eval_steps]:
                 self.eval(step)
                 self.render_traj(step)
+            
+            if step % 100 == 0:
+                self.eval(step, stage="debug")
 
             # run compression
             if cfg.compression is not None and step in [i - 1 for i in cfg.eval_steps]:
@@ -756,6 +781,8 @@ class Runner:
         ellipse_time = 0
         metrics = {"psnr": [], "ssim": [], "lpips": []}
         for i, data in enumerate(valloader):
+            if stage == "debug" and i == 1:
+                break
             camtoworlds = data["camtoworld"].to(device)
             Ks = data["K"].to(device)
             pixels = data["image"].to(device) / 255.0
@@ -772,11 +799,22 @@ class Runner:
                 near_plane=cfg.near_plane,
                 far_plane=cfg.far_plane,
             )  # [1, H, W, 3]
+            colors_debug, _, _ = self.rasterize_splats(
+                camtoworlds=camtoworlds,
+                Ks=Ks,
+                width=width,
+                height=height,
+                sh_degree=cfg.sh_degree,
+                near_plane=cfg.near_plane,
+                far_plane=cfg.far_plane,
+                debug=True,
+            )  # [1, H, W, 3]
             torch.cuda.synchronize()
             ellipse_time += time.time() - tic
 
             colors = torch.clamp(colors, 0.0, 1.0)
-            canvas_list = [pixels, colors]
+            colors_debug = torch.clamp(colors_debug, 0.0, 1.0)
+            canvas_list = [pixels, colors, colors_debug]
 
             if world_rank == 0:
                 # write images
@@ -870,10 +908,21 @@ class Runner:
                 far_plane=cfg.far_plane,
                 render_mode="RGB+ED",
             )  # [1, H, W, 4]
+            colors_debug, _, _ = self.rasterize_splats(
+                camtoworlds=camtoworlds,
+                Ks=Ks,
+                width=width,
+                height=height,
+                sh_degree=cfg.sh_degree,
+                near_plane=cfg.near_plane,
+                far_plane=cfg.far_plane,
+                debug=True,
+            )  # [1, H, W, 3]
             colors = torch.clamp(renders[..., 0:3], 0.0, 1.0)  # [1, H, W, 3]
-            depths = renders[..., 3:4]  # [1, H, W, 1]
-            depths = (depths - depths.min()) / (depths.max() - depths.min())
-            canvas_list = [colors, depths.repeat(1, 1, 1, 3)]
+            colors_debug = torch.clamp(colors_debug, 0.0, 1.0)
+            # depths = renders[..., 3:4]  # [1, H, W, 1]
+            # depths = (depths - depths.min()) / (depths.max() - depths.min())
+            canvas_list = [colors, colors_debug]
 
             # write images
             canvas = torch.cat(canvas_list, dim=2).squeeze(0).cpu().numpy()

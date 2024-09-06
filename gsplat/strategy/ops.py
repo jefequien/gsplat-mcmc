@@ -403,8 +403,8 @@ def relocate_sh_clusters(
             for idx_d, idx_s in zip(dead_codebook_indices, sampled_codebook_indices):
                 indices_s = (indices == idx_s).nonzero(as_tuple=True)[0]
 
-                # Split cluster along x dimension
-                xs = params["means"][:, 0][indices_s]
+                # Split cluster along z dimension
+                xs = params["means"][:, 2][indices_s]
                 indices_s_half = indices_s[torch.argsort(xs)[: len(indices_s) // 2]]
                 # indices_s_half = indices_s[: len(indices_s) // 2]
                 p[indices_s_half] = idx_d.float()

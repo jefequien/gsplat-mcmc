@@ -1,6 +1,7 @@
 SCENE_DIR="data/360_v2"
 # eval all 9 scenes for benchmarking
-SCENE_LIST="garden bicycle stump bonsai counter kitchen room treehill flowers"
+SCENE_LIST="garden" #  bicycle stump bonsai counter kitchen room treehill flowers"
+RENDER_TRAJ_PATH="ellipse"
 
 # # 0.36M GSs
 # RESULT_DIR="results/benchmark_mcmc_0_36M_png_compression"
@@ -36,12 +37,14 @@ do
     # train without eval
     CUDA_VISIBLE_DEVICES=0 python simple_trainer.py mcmc --disable_viewer --data_factor $DATA_FACTOR \
         --strategy.cap-max $CAP_MAX \
+        --render_traj_path $RENDER_TRAJ_PATH \
         --data_dir $SCENE_DIR/$SCENE/ \
         --result_dir $RESULT_DIR/$SCENE/
 
     # eval: use vgg for lpips to align with other benchmarks
     CUDA_VISIBLE_DEVICES=0 python simple_trainer.py mcmc --disable_viewer --data_factor $DATA_FACTOR \
         --strategy.cap-max $CAP_MAX \
+        --render_traj_path $RENDER_TRAJ_PATH \
         --data_dir $SCENE_DIR/$SCENE/ \
         --result_dir $RESULT_DIR/$SCENE/ \
         --lpips_net vgg \
