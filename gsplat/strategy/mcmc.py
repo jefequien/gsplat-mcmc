@@ -6,7 +6,7 @@ import torch
 from torch import Tensor
 
 from .base import Strategy
-from .ops import inject_noise_to_position, relocate, sample_add
+from .ops import inject_noise_to_position, relocate, sample_add, relocate_sh_clusters
 
 
 @dataclass
@@ -137,6 +137,14 @@ class MCMCStrategy(Strategy):
                     f"Now having {len(params['means'])} GSs."
                 )
 
+            # relocate sh clusters
+            n_relocated, n_alive = self._relocate_sh_clusters(params, optimizers)
+            if self.verbose:
+                print(
+                    f"Step {step}: Relocated {n_relocated} SHs. "
+                    f"Now having {n_alive} SHs."
+                )
+
             torch.cuda.empty_cache()
 
         # add noise to GSs
@@ -185,3 +193,15 @@ class MCMCStrategy(Strategy):
                 min_opacity=self.min_opacity,
             )
         return n_gs
+
+    @torch.no_grad()
+    def _relocate_sh_clusters(
+        self,
+        params: Union[Dict[str, torch.nn.Parameter], torch.nn.ParameterDict],
+        optimizers: Dict[str, torch.optim.Optimizer],
+    ) -> int:
+        n_relocated, n_alive = relocate_sh_clusters(
+            params=params,
+            optimizers=optimizers,
+        )
+        return n_relocated, n_alive

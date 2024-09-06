@@ -51,7 +51,7 @@ class PngCompression:
             "quats": _compress_png,
             "opacities": _compress_png,
             "sh0": _compress_png,
-            # "shN": _compress_kmeans,
+            "shN": _compress_kmeans,
             "shN_indices": _compress_shN_indices,
             "shN_codebook": _compress_shN_codebook,
         }
@@ -67,7 +67,7 @@ class PngCompression:
             "quats": _decompress_png,
             "opacities": _decompress_png,
             "sh0": _decompress_png,
-            # "shN": _decompress_kmeans,
+            "shN": _decompress_kmeans,
             "shN_indices": _decompress_shN_indices,
             "shN_codebook": _decompress_shN_codebook,
         }
@@ -323,6 +323,7 @@ def _decompress_npz(compress_dir: str, param_name: str, meta: Dict[str, Any]) ->
     params = params.reshape(meta["shape"])
     params = params.to(dtype=getattr(torch, meta["dtype"]))
     return params
+
 
 def _compress_shN_indices(
     compress_dir: str, param_name: str, params: Tensor, **kwargs
