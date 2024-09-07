@@ -379,19 +379,17 @@ def inject_noise_to_position(
 def relocate_sh_clusters(
     params: Union[Dict[str, torch.nn.Parameter], torch.nn.ParameterDict],
     optimizers: Dict[str, torch.optim.Optimizer],
+    codebook_counts: Tensor,
+    dead_mask: Tensor,
+    n: int,
 ):
-    codebook_size = len(params["shN_codebook"])
-    codebook_counts = torch.bincount(
-        params["shN_indices"].int(), minlength=codebook_size
-    )
-    dead_codebook_indices = (codebook_counts == 0).nonzero(as_tuple=True)[0]
-
-    sampled_codebook_indices = torch.argsort(codebook_counts, descending=True)
+    dead_codebook_indices = dead_mask.nonzero(as_tuple=True)[0]
+    sampled_codebook_indices = torch.argsort(codebook_counts[1:], descending=True) + 1
     sampled_codebook_indices = sampled_codebook_indices[
         codebook_counts[sampled_codebook_indices] > 2
     ]
-    n_relocated = min(len(dead_codebook_indices), len(sampled_codebook_indices))
-    n_alive = codebook_size - len(dead_codebook_indices) + n_relocated
+    
+    n_relocated = min(min(n, len(dead_codebook_indices)), len(sampled_codebook_indices))
     dead_codebook_indices = dead_codebook_indices[:n_relocated]
     sampled_codebook_indices = sampled_codebook_indices[:n_relocated]
     axis_splits = torch.randint(3, (n_relocated,))
@@ -401,6 +399,9 @@ def relocate_sh_clusters(
             p[dead_codebook_indices] = p[sampled_codebook_indices]
         elif name == "shN_indices":
             indices = p.int()
+            for idx_d in dead_codebook_indices:
+                p[indices == idx_d] = 0
+                
             for idx_d, idx_s, axis_split in zip(dead_codebook_indices, sampled_codebook_indices, axis_splits):
                 indices_s = (indices == idx_s).nonzero(as_tuple=True)[0]
 
@@ -417,4 +418,31 @@ def relocate_sh_clusters(
 
     # update the parameters and the state in the optimizers
     _update_param_with_optimizer(param_fn, optimizer_fn, params, optimizers)
-    return n_relocated, n_alive
+    return n_relocated
+
+
+@torch.no_grad()
+def merge_sh_clusters(
+    params: Union[Dict[str, torch.nn.Parameter], torch.nn.ParameterDict],
+    optimizers: Dict[str, torch.optim.Optimizer],
+    zero_mask: Tensor,
+):
+    zero_codebook_indices = zero_mask.nonzero(as_tuple=True)[0]
+    
+    def param_fn(name: str, p: Tensor) -> Tensor:
+        if name == "shN_codebook":
+            p[zero_codebook_indices] = 0
+        elif name == "shN_indices":
+            indices = p.int()
+            for idx_d in zero_codebook_indices:
+                p[indices == idx_d] = 0
+        return torch.nn.Parameter(p)
+    
+    def optimizer_fn(name: str, key: str, v: Tensor) -> Tensor:
+        if name == "shN_codebook":
+            v[zero_codebook_indices] = 0
+        return v
+    
+    # update the parameters and the state in the optimizers
+    _update_param_with_optimizer(param_fn, optimizer_fn, params, optimizers)
+    

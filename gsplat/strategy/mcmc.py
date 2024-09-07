@@ -6,7 +6,7 @@ import torch
 from torch import Tensor
 
 from .base import Strategy
-from .ops import inject_noise_to_position, relocate, sample_add, relocate_sh_clusters
+from .ops import inject_noise_to_position, relocate, sample_add, relocate_sh_clusters, merge_sh_clusters
 
 
 @dataclass
@@ -116,7 +116,6 @@ class MCMCStrategy(Strategy):
         """
         # move to the correct device
         state["binoms"] = state["binoms"].to(params["means"].device)
-
         binoms = state["binoms"]
 
         if (
@@ -136,13 +135,19 @@ class MCMCStrategy(Strategy):
                     f"Step {step}: Added {n_new_gs} GSs. "
                     f"Now having {len(params['means'])} GSs."
                 )
+            
+            # n_zero = self._merge_sh_clusters(params, optimizers)
+            # if self.verbose:
+            #     print(
+            #         f"Step {step}: {n_zero} near zero SHs. "
+            #     )
 
             # relocate sh clusters
-            n_relocated, n_alive = self._relocate_sh_clusters(params, optimizers)
+            n_relocated, n_used = self._relocate_sh_clusters(params, optimizers)
             if self.verbose:
                 print(
                     f"Step {step}: Relocated {n_relocated} SHs. "
-                    f"Now having {n_alive} SHs."
+                    f"Now having {n_used} SHs."
                 )
 
             torch.cuda.empty_cache()
@@ -200,8 +205,45 @@ class MCMCStrategy(Strategy):
         params: Union[Dict[str, torch.nn.Parameter], torch.nn.ParameterDict],
         optimizers: Dict[str, torch.optim.Optimizer],
     ) -> int:
-        n_relocated, n_alive = relocate_sh_clusters(
-            params=params,
-            optimizers=optimizers,
+        codebook_size = len(params["shN_codebook"])
+        codebook_counts = torch.bincount(
+            params["shN_indices"].int(), minlength=codebook_size
         )
-        return n_relocated, n_alive
+        dead_mask = codebook_counts == 0
+        
+        current_n_clusters = codebook_size - dead_mask.sum().item()
+        n_target = min(codebook_size, int(1.05 * current_n_clusters))
+        n_add = n_target - current_n_clusters
+        
+        n_relocated = 0
+        if n_add > 0:
+            n_relocated = relocate_sh_clusters(
+                params=params,
+                optimizers=optimizers,
+                codebook_counts=codebook_counts,
+                dead_mask=dead_mask,
+                n=n_add,
+            )
+        return n_relocated, current_n_clusters + n_relocated
+
+    @torch.no_grad()
+    def _merge_sh_clusters(
+        self,
+        params: Union[Dict[str, torch.nn.Parameter], torch.nn.ParameterDict],
+        optimizers: Dict[str, torch.optim.Optimizer],
+    ) -> int:
+        codebook_size = len(params["shN_codebook"])
+        codebook_means = params["shN_codebook"].reshape(codebook_size, -1).abs().mean(dim=-1)
+        zero_mask = codebook_means < 0.001
+        # # Ignore first item in codebook
+        # zero_mask[0] = 0
+        
+        n_zero = zero_mask.sum().item()
+        # if n_zero > 0:
+        #     merge_sh_clusters(
+        #         params=params,
+        #         optimizers=optimizers,
+        #         zero_mask=zero_mask,
+        #     )
+        return n_zero
+    

@@ -22,7 +22,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMeasure
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 from typing_extensions import Literal, assert_never
-from utils import AppearanceOptModule, CameraOptModule, knn, rgb_to_sh, set_random_seed
+from utils import AppearanceOptModule, CameraOptModule, knn, kmeans, rgb_to_sh, set_random_seed
 
 from gsplat.compression import PngCompression
 from gsplat.distributed import cli
@@ -113,6 +113,8 @@ class Config:
     opacity_reg: float = 0.0
     # Scale regularization
     scale_reg: float = 0.0
+    # shN regularization
+    shN_reg: float = 0.0
 
     # Enable camera optimization.
     pose_opt: bool = False
@@ -217,9 +219,8 @@ def create_splats_with_optimizers(
         colors = torch.zeros((N, K, 3))  # [N, K, 3]
         colors[:, 0, :] = rgb_to_sh(rgbs)
         params.append(("sh0", torch.nn.Parameter(colors[:, :1, :]), 2.5e-3))
-        # params.append(("shN", torch.nn.Parameter(colors[:, 1:, :]), 2.5e-3 / 20))
-        params.append(("shN_indices", torch.zeros(N), 0.0))
-        # params.append(("shN_indices", torch.linspace(0, 2**16 - 1, N).round(), 0.0))
+        shN_indices = kmeans(points.to(device), n_clusters=min(len(points), 2**16)).float()
+        params.append(("shN_indices", shN_indices, 0.0))
         params.append(
             (
                 "shN_codebook",
@@ -433,6 +434,12 @@ class Runner:
         else:
             # colors = torch.cat([self.splats["sh0"], self.splats["shN"]], 1)  # [N, K, 3]
             shN = self.splats["shN_codebook"][self.splats["shN_indices"].int()]
+            
+            # codebook = self.splats["shN_codebook"]
+            # indices = self.splats["shN_indices"].int()
+            # nonzero_indices = indices != 0
+            # shN = torch.zeros(indices.shape[0], *codebook.shape[1:], device=self.device)
+            # shN[nonzero_indices] = codebook[indices[nonzero_indices]]
             colors = torch.cat([self.splats["sh0"], shN], 1)  # [N, K, 3]
 
         rasterize_mode = "antialiased" if self.cfg.antialiased else "classic"
@@ -608,6 +615,8 @@ class Runner:
                     loss
                     + cfg.scale_reg * torch.abs(torch.exp(self.splats["scales"])).mean()
                 )
+            if cfg.shN_reg > 0.0:
+                loss += cfg.shN_reg * torch.abs(self.splats["shN_codebook"]).mean()
 
             loss.backward()
 

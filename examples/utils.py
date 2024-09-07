@@ -2,6 +2,7 @@ import random
 
 import numpy as np
 import torch
+import sklearn
 from sklearn.neighbors import NearestNeighbors
 from torch import Tensor
 import torch.nn.functional as F
@@ -142,6 +143,22 @@ def knn(x: Tensor, K: int = 4) -> Tensor:
     distances, _ = model.kneighbors(x_np)
     return torch.from_numpy(distances).to(x)
 
+def kmeans_cpu(x: Tensor, n_clusters: int) -> Tensor:
+    x_np = x.cpu().numpy()
+    model = sklearn.cluster.KMeans(n_clusters=n_clusters).fit(x_np)
+    labels = model.labels_
+    return torch.from_numpy(labels).to(x)
+
+def kmeans(x: Tensor, n_clusters: int, distance:str = "euclidean") -> Tensor:
+    try:
+        from torchpq.clustering import KMeans
+    except:
+        raise ImportError(
+            "Please install torchpq with 'pip install torchpq' to use K-means clustering"
+        )
+    kmeans = KMeans(n_clusters=n_clusters, distance=distance, verbose=True)
+    labels = kmeans.fit(x.permute(1, 0).contiguous())
+    return labels
 
 def rgb_to_sh(rgb: Tensor) -> Tensor:
     C0 = 0.28209479177387814
