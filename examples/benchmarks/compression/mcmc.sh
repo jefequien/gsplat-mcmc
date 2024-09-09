@@ -34,19 +34,19 @@ do
     echo "Running $SCENE"
 
     # train without eval
-    # CUDA_VISIBLE_DEVICES=0 python simple_trainer.py mcmc --disable_viewer --data_factor $DATA_FACTOR \
-    #     --strategy.cap-max $CAP_MAX \
-    #     --data_dir $SCENE_DIR/$SCENE/ \
-    #     --result_dir $RESULT_DIR/$SCENE/
+    CUDA_VISIBLE_DEVICES=0 python simple_trainer.py mcmc --disable_viewer --data_factor $DATA_FACTOR \
+        --strategy.cap-max $CAP_MAX \
+        --data_dir $SCENE_DIR/$SCENE/ \
+        --result_dir $RESULT_DIR/$SCENE/
 
-    # # eval: use vgg for lpips to align with other benchmarks
-    # CUDA_VISIBLE_DEVICES=0 python simple_trainer.py mcmc --disable_viewer --data_factor $DATA_FACTOR \
-    #     --strategy.cap-max $CAP_MAX \
-    #     --data_dir $SCENE_DIR/$SCENE/ \
-    #     --result_dir $RESULT_DIR/$SCENE/ \
-    #     --lpips_net vgg \
-    #     --compression png \
-    #     --ckpt $RESULT_DIR/$SCENE/ckpts/ckpt_29999_rank0.pt
+    # eval: use vgg for lpips to align with other benchmarks
+    CUDA_VISIBLE_DEVICES=0 python simple_trainer.py mcmc --disable_viewer --data_factor $DATA_FACTOR \
+        --strategy.cap-max $CAP_MAX \
+        --data_dir $SCENE_DIR/$SCENE/ \
+        --result_dir $RESULT_DIR/$SCENE/ \
+        --lpips_net vgg \
+        --compression png \
+        --ckpt $RESULT_DIR/$SCENE/ckpts/ckpt_29999_rank0.pt
 done
 
 # Zip the compressed files and summarize the stats

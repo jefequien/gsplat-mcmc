@@ -22,7 +22,14 @@ from torch.utils.tensorboard import SummaryWriter
 from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMeasure
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 from typing_extensions import Literal, assert_never
-from utils import AppearanceOptModule, CameraOptModule, knn, kmeans, rgb_to_sh, set_random_seed
+from utils import (
+    AppearanceOptModule,
+    CameraOptModule,
+    knn,
+    kmeans,
+    rgb_to_sh,
+    set_random_seed,
+)
 
 from gsplat.compression import PngCompression
 from gsplat.distributed import cli
@@ -219,7 +226,7 @@ def create_splats_with_optimizers(
         colors = torch.zeros((N, K, 3))  # [N, K, 3]
         colors[:, 0, :] = rgb_to_sh(rgbs)
         params.append(("sh0", torch.nn.Parameter(colors[:, :1, :]), 2.5e-3))
-        shN_indices = kmeans(points.to(device), n_clusters=min(len(points), 2**16)).float()
+        shN_indices = kmeans(points.to(device), n_clusters=2**16).float()
         params.append(("shN_indices", shN_indices, 0.0))
         params.append(
             (
@@ -434,7 +441,7 @@ class Runner:
         else:
             # colors = torch.cat([self.splats["sh0"], self.splats["shN"]], 1)  # [N, K, 3]
             shN = self.splats["shN_codebook"][self.splats["shN_indices"].int()]
-            
+
             # codebook = self.splats["shN_codebook"]
             # indices = self.splats["shN_indices"].int()
             # nonzero_indices = indices != 0

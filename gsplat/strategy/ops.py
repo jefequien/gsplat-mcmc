@@ -388,7 +388,7 @@ def relocate_sh_clusters(
     sampled_codebook_indices = sampled_codebook_indices[
         codebook_counts[sampled_codebook_indices] > 2
     ]
-    
+
     n_relocated = min(min(n, len(dead_codebook_indices)), len(sampled_codebook_indices))
     dead_codebook_indices = dead_codebook_indices[:n_relocated]
     sampled_codebook_indices = sampled_codebook_indices[:n_relocated]
@@ -401,8 +401,10 @@ def relocate_sh_clusters(
             indices = p.int()
             for idx_d in dead_codebook_indices:
                 p[indices == idx_d] = 0
-                
-            for idx_d, idx_s, axis_split in zip(dead_codebook_indices, sampled_codebook_indices, axis_splits):
+
+            for idx_d, idx_s, axis_split in zip(
+                dead_codebook_indices, sampled_codebook_indices, axis_splits
+            ):
                 indices_s = (indices == idx_s).nonzero(as_tuple=True)[0]
 
                 # Split cluster along random axis
@@ -428,7 +430,7 @@ def merge_sh_clusters(
     zero_mask: Tensor,
 ):
     zero_codebook_indices = zero_mask.nonzero(as_tuple=True)[0]
-    
+
     def param_fn(name: str, p: Tensor) -> Tensor:
         if name == "shN_codebook":
             p[zero_codebook_indices] = 0
@@ -437,12 +439,11 @@ def merge_sh_clusters(
             for idx_d in zero_codebook_indices:
                 p[indices == idx_d] = 0
         return torch.nn.Parameter(p)
-    
+
     def optimizer_fn(name: str, key: str, v: Tensor) -> Tensor:
         if name == "shN_codebook":
             v[zero_codebook_indices] = 0
         return v
-    
+
     # update the parameters and the state in the optimizers
     _update_param_with_optimizer(param_fn, optimizer_fn, params, optimizers)
-    

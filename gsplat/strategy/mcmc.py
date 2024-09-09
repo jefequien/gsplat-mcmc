@@ -6,7 +6,13 @@ import torch
 from torch import Tensor
 
 from .base import Strategy
-from .ops import inject_noise_to_position, relocate, sample_add, relocate_sh_clusters, merge_sh_clusters
+from .ops import (
+    inject_noise_to_position,
+    relocate,
+    sample_add,
+    relocate_sh_clusters,
+    merge_sh_clusters,
+)
 
 
 @dataclass
@@ -135,7 +141,7 @@ class MCMCStrategy(Strategy):
                     f"Step {step}: Added {n_new_gs} GSs. "
                     f"Now having {len(params['means'])} GSs."
                 )
-            
+
             # n_zero = self._merge_sh_clusters(params, optimizers)
             # if self.verbose:
             #     print(
@@ -210,11 +216,11 @@ class MCMCStrategy(Strategy):
             params["shN_indices"].int(), minlength=codebook_size
         )
         dead_mask = codebook_counts == 0
-        
+
         current_n_clusters = codebook_size - dead_mask.sum().item()
         n_target = min(codebook_size, int(1.05 * current_n_clusters))
         n_add = n_target - current_n_clusters
-        
+
         n_relocated = 0
         if n_add > 0:
             n_relocated = relocate_sh_clusters(
@@ -233,11 +239,13 @@ class MCMCStrategy(Strategy):
         optimizers: Dict[str, torch.optim.Optimizer],
     ) -> int:
         codebook_size = len(params["shN_codebook"])
-        codebook_means = params["shN_codebook"].reshape(codebook_size, -1).abs().mean(dim=-1)
+        codebook_means = (
+            params["shN_codebook"].reshape(codebook_size, -1).abs().mean(dim=-1)
+        )
         zero_mask = codebook_means < 0.001
         # # Ignore first item in codebook
         # zero_mask[0] = 0
-        
+
         n_zero = zero_mask.sum().item()
         # if n_zero > 0:
         #     merge_sh_clusters(
@@ -246,4 +254,3 @@ class MCMCStrategy(Strategy):
         #         zero_mask=zero_mask,
         #     )
         return n_zero
-    
