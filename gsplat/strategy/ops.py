@@ -239,6 +239,7 @@ def reset_opa(
 def relocate(
     params: Union[Dict[str, torch.nn.Parameter], torch.nn.ParameterDict],
     optimizers: Dict[str, torch.optim.Optimizer],
+    splats: Union[Dict[str, torch.nn.Parameter], torch.nn.ParameterDict],
     state: Dict[str, Tensor],
     mask: Tensor,
     binoms: Tensor,
@@ -252,7 +253,7 @@ def relocate(
         mask: A boolean mask to indicates which Gaussians are dead.
     """
     # support "opacities" with shape [N,] or [N, 1]
-    opacities = torch.sigmoid(params["opacities"])
+    opacities = splats["opacities"]
 
     dead_indices = mask.nonzero(as_tuple=True)[0]
     alive_indices = (~mask).nonzero(as_tuple=True)[0]
@@ -265,7 +266,7 @@ def relocate(
     sampled_idxs = alive_indices[sampled_idxs]
     new_opacities, new_scales = compute_relocation(
         opacities=opacities[sampled_idxs],
-        scales=torch.exp(params["scales"])[sampled_idxs],
+        scales=splats["scales"][sampled_idxs],
         ratios=torch.bincount(sampled_idxs)[sampled_idxs] + 1,
         binoms=binoms,
     )
@@ -295,19 +296,20 @@ def relocate(
 def sample_add(
     params: Union[Dict[str, torch.nn.Parameter], torch.nn.ParameterDict],
     optimizers: Dict[str, torch.optim.Optimizer],
+    splats: Union[Dict[str, torch.nn.Parameter], torch.nn.ParameterDict],
     state: Dict[str, Tensor],
     n: int,
     binoms: Tensor,
     min_opacity: float = 0.005,
 ):
-    opacities = torch.sigmoid(params["opacities"])
+    opacities = splats["opacities"]
 
     eps = torch.finfo(torch.float32).eps
     probs = opacities.flatten()
     sampled_idxs = _multinomial_sample(probs, n, replacement=True)
     new_opacities, new_scales = compute_relocation(
         opacities=opacities[sampled_idxs],
-        scales=torch.exp(params["scales"])[sampled_idxs],
+        scales=splats["scales"][sampled_idxs],
         ratios=torch.bincount(sampled_idxs)[sampled_idxs] + 1,
         binoms=binoms,
     )
@@ -338,13 +340,14 @@ def sample_add(
 def inject_noise_to_position(
     params: Union[Dict[str, torch.nn.Parameter], torch.nn.ParameterDict],
     optimizers: Dict[str, torch.optim.Optimizer],
+    splats: Union[Dict[str, torch.nn.Parameter], torch.nn.ParameterDict],
     state: Dict[str, Tensor],
     scaler: float,
 ):
-    opacities = torch.sigmoid(params["opacities"].flatten())
-    scales = torch.exp(params["scales"])
+    opacities = splats["opacities"].flatten()
+    scales = splats["scales"]
     covars, _ = quat_scale_to_covar_preci(
-        params["quats"],
+        splats["quats"],
         scales,
         compute_covar=True,
         compute_preci=False,
@@ -355,9 +358,11 @@ def inject_noise_to_position(
         return 1 / (1 + torch.exp(-k * (x - x0)))
 
     noise = (
-        torch.randn_like(params["means"])
+        torch.randn_like(splats["means"])
         * (op_sigmoid(1 - opacities)).unsqueeze(-1)
         * scaler
     )
     noise = torch.einsum("bij,bj->bi", covars, noise)
-    params["means"].add_(noise)
+    # params["means"].add_(noise)
+    params["means"][:noise.shape[0]] += noise
+    

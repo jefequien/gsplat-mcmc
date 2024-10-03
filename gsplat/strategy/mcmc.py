@@ -104,6 +104,7 @@ class MCMCStrategy(Strategy):
         self,
         params: Union[Dict[str, torch.nn.Parameter], torch.nn.ParameterDict],
         optimizers: Dict[str, torch.optim.Optimizer],
+        splats: Union[Dict[str, torch.nn.Parameter], torch.nn.ParameterDict],
         state: Dict[str, Any],
         step: int,
         info: Dict[str, Any],
@@ -125,12 +126,12 @@ class MCMCStrategy(Strategy):
             and step % self.refine_every == 0
         ):
             # teleport GSs
-            n_relocated_gs = self._relocate_gs(params, optimizers, binoms)
+            n_relocated_gs = self._relocate_gs(params, optimizers, splats, binoms)
             if self.verbose:
                 print(f"Step {step}: Relocated {n_relocated_gs} GSs.")
 
             # add new GSs
-            n_new_gs = self._add_new_gs(params, optimizers, binoms)
+            n_new_gs = self._add_new_gs(params, optimizers, splats, binoms)
             if self.verbose:
                 print(
                     f"Step {step}: Added {n_new_gs} GSs. "
@@ -141,7 +142,7 @@ class MCMCStrategy(Strategy):
 
         # add noise to GSs
         inject_noise_to_position(
-            params=params, optimizers=optimizers, state={}, scaler=lr * self.noise_lr
+            params=params, optimizers=optimizers, splats=splats, state={}, scaler=lr * self.noise_lr
         )
 
     @torch.no_grad()
@@ -149,15 +150,17 @@ class MCMCStrategy(Strategy):
         self,
         params: Union[Dict[str, torch.nn.Parameter], torch.nn.ParameterDict],
         optimizers: Dict[str, torch.optim.Optimizer],
+        splats: Union[Dict[str, torch.nn.Parameter], torch.nn.ParameterDict],
         binoms: Tensor,
     ) -> int:
-        opacities = torch.sigmoid(params["opacities"].flatten())
+        opacities = splats["opacities"]
         dead_mask = opacities <= self.min_opacity
         n_gs = dead_mask.sum().item()
         if n_gs > 0:
             relocate(
                 params=params,
                 optimizers=optimizers,
+                splats=splats,
                 state={},
                 mask=dead_mask,
                 binoms=binoms,
@@ -170,6 +173,7 @@ class MCMCStrategy(Strategy):
         self,
         params: Union[Dict[str, torch.nn.Parameter], torch.nn.ParameterDict],
         optimizers: Dict[str, torch.optim.Optimizer],
+        splats: Union[Dict[str, torch.nn.Parameter], torch.nn.ParameterDict],
         binoms: Tensor,
     ) -> int:
         current_n_points = len(params["means"])
@@ -179,6 +183,7 @@ class MCMCStrategy(Strategy):
             sample_add(
                 params=params,
                 optimizers=optimizers,
+                splats=splats,
                 state={},
                 n=n_gs,
                 binoms=binoms,

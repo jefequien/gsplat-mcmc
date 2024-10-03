@@ -35,6 +35,7 @@ from lib_bilagrid import (
     color_correct,
     total_variation_loss,
 )
+from mlp import create_mlp
 
 from gsplat.compression import PngCompression
 from gsplat.distributed import cli
@@ -82,7 +83,7 @@ class Config:
     # Number of training steps
     max_steps: int = 30_000
     # Steps to evaluate the model
-    eval_steps: List[int] = field(default_factory=lambda: [7_000, 30_000])
+    eval_steps: List[int] = field(default_factory=lambda: [2_000, 7_000, 15_000, 30_000])
     # Steps to save the model
     save_steps: List[int] = field(default_factory=lambda: [7_000, 30_000])
 
@@ -221,31 +222,34 @@ def create_splats_with_optimizers(
     scales = scales[world_rank::world_size]
 
     N = points.shape[0]
-    quats = torch.rand((N, 4))  # [N, 4]
+    # quats = torch.rand((N, 4))  # [N, 4]
     opacities = torch.logit(torch.full((N,), init_opacity))  # [N,]
+    features = torch.rand(N, 32)
 
     params = [
         # name, value, lr
         ("means", torch.nn.Parameter(points), 1.6e-4 * scene_scale),
-        ("scales", torch.nn.Parameter(scales), 5e-3),
-        ("quats", torch.nn.Parameter(quats), 1e-3),
         ("opacities", torch.nn.Parameter(opacities), 5e-2),
+        ("features", torch.nn.Parameter(features), 1e-2),
+        # ("scales", torch.nn.Parameter(scales), 5e-3),
+        # ("quats", torch.nn.Parameter(quats), 1e-3),
     ]
 
-    if feature_dim is None:
-        # color is SH coefficients.
-        colors = torch.zeros((N, (sh_degree + 1) ** 2, 3))  # [N, K, 3]
-        colors[:, 0, :] = rgb_to_sh(rgbs)
-        params.append(("sh0", torch.nn.Parameter(colors[:, :1, :]), 2.5e-3))
-        params.append(("shN", torch.nn.Parameter(colors[:, 1:, :]), 2.5e-3 / 20))
-    else:
-        # features will be used for appearance and view-dependent shading
-        features = torch.rand(N, feature_dim)  # [N, feature_dim]
-        params.append(("features", torch.nn.Parameter(features), 2.5e-3))
-        colors = torch.logit(rgbs)  # [N, 3]
-        params.append(("colors", torch.nn.Parameter(colors), 2.5e-3))
+    # if feature_dim is None:
+    #     # color is SH coefficients.
+    #     colors = torch.zeros((N, (sh_degree + 1) ** 2, 3))  # [N, K, 3]
+    #     colors[:, 0, :] = rgb_to_sh(rgbs)
+    #     params.append(("sh0", torch.nn.Parameter(colors[:, :1, :]), 2.5e-3))
+    #     params.append(("shN", torch.nn.Parameter(colors[:, 1:, :]), 2.5e-3 / 20))
+    # else:
+    #     # features will be used for appearance and view-dependent shading
+    #     features = torch.rand(N, feature_dim)  # [N, feature_dim]
+    #     params.append(("features", torch.nn.Parameter(features), 2.5e-3))
+    #     colors = torch.logit(rgbs)  # [N, 3]
+    #     params.append(("colors", torch.nn.Parameter(colors), 2.5e-3))
 
     splats = torch.nn.ParameterDict({n: v for n, v, _ in params}).to(device)
+    
     # Scale learning rate based on batch size, reference:
     # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
     # Note that this would not make the training exactly equivalent, see
@@ -317,7 +321,7 @@ class Runner:
 
         # Model
         feature_dim = 32 if cfg.app_opt else None
-        self.splats, self.optimizers = create_splats_with_optimizers(
+        self.params, self.optimizers = create_splats_with_optimizers(
             self.parser,
             init_type=cfg.init_type,
             init_num_pts=cfg.init_num_pts,
@@ -334,10 +338,15 @@ class Runner:
             world_rank=world_rank,
             world_size=world_size,
         )
-        print("Model initialized. Number of GS:", len(self.splats["means"]))
+        self.quats_mlp = create_mlp(in_dim=32, num_layers=2, layer_width=64, out_dim=4).to(self.device)
+        self.scales_mlp = create_mlp(in_dim=32, num_layers=2, layer_width=64, out_dim=3).to(self.device)
+        # self.opacities_mlp = create_mlp(in_dim=32, num_layers=2, layer_width=64, out_dim=1).to(self.device)
+        self.sh0_mlp = create_mlp(in_dim=32+3, num_layers=2, layer_width=64, out_dim=3).to(self.device)
+        # self.shN_mlp = create_mlp(in_dim=32, num_layers=2, layer_width=64, out_dim=45).to(self.device)
+        print("Model initialized. Number of GS:", len(self.params["means"]))
 
         # Densification Strategy
-        self.cfg.strategy.check_sanity(self.splats, self.optimizers)
+        # self.cfg.strategy.check_sanity(self.params, self.optimizers)
 
         if isinstance(self.cfg.strategy, DefaultStrategy):
             self.strategy_state = self.cfg.strategy.initialize_state(
@@ -414,6 +423,29 @@ class Runner:
                     eps=1e-15,
                 ),
             ]
+        
+        self.mlp_optimizers = [
+            torch.optim.Adam(
+                self.quats_mlp.parameters(),
+                lr=1e-3 * math.sqrt(cfg.batch_size),
+            ),
+            torch.optim.Adam(
+                self.scales_mlp.parameters(),
+                lr=5e-3 * math.sqrt(cfg.batch_size),
+            ),
+            # torch.optim.Adam(
+            #     self.opacities_mlp.parameters(),
+            #     lr=5e-2 * math.sqrt(cfg.batch_size),
+            # ),
+            torch.optim.Adam(
+                self.sh0_mlp.parameters(),
+                lr=2.5e-3 * math.sqrt(cfg.batch_size),
+            ),
+            # torch.optim.Adam(
+            #     self.shN_mlp.parameters(),
+            #     lr=(2.5e-3 / 20) * math.sqrt(cfg.batch_size),
+            # ),
+        ]
 
         # Losses & Metrics.
         self.ssim = StructuralSimilarityIndexMeasure(data_range=1.0).to(self.device)
@@ -449,25 +481,46 @@ class Runner:
         masks: Optional[Tensor] = None,
         **kwargs,
     ) -> Tuple[Tensor, Tensor, Dict]:
-        means = self.splats["means"]  # [N, 3]
-        # quats = F.normalize(self.splats["quats"], dim=-1)  # [N, 4]
+        means = self.params["means"]  # [N, 3]
+        # quats = F.normalize(self.params["quats"], dim=-1)  # [N, 4]
         # rasterization does normalization internally
-        quats = self.splats["quats"]  # [N, 4]
-        scales = torch.exp(self.splats["scales"])  # [N, 3]
-        opacities = torch.sigmoid(self.splats["opacities"])  # [N,]
+        # quats = self.params["quats"]  # [N, 4]
+        # scales = torch.exp(self.params["scales"])  # [N, 3]
+        opacities = torch.sigmoid(self.params["opacities"])  # [N,]
+        
+        quats = self.quats_mlp(self.params["features"]).float()
+        scales = torch.exp(self.scales_mlp(self.params["features"]).float() - 5.)
+        # opacities = torch.sigmoid(self.opacities_mlp(self.params["features"]).float().reshape(-1))
 
         image_ids = kwargs.pop("image_ids", None)
         if self.cfg.app_opt:
             colors = self.app_module(
-                features=self.splats["features"],
+                features=self.params["features"],
                 embed_ids=image_ids,
                 dirs=means[None, :, :] - camtoworlds[:, None, :3, 3],
                 sh_degree=kwargs.pop("sh_degree", self.cfg.sh_degree),
             )
-            colors = colors + self.splats["colors"]
+            colors = colors + self.params["colors"]
             colors = torch.sigmoid(colors)
         else:
-            colors = torch.cat([self.splats["sh0"], self.splats["shN"]], 1)  # [N, K, 3]
+            N = len(self.params["features"])
+            view_dir = F.normalize(self.params["means"] - camtoworlds[:, :3, 3], dim=-1)  # [N, 3]        
+            sh0_input = torch.cat([view_dir, self.params["features"]], dim=1)
+            colors = self.sh0_mlp(sh0_input).float().reshape((N, 1, 3))
+            
+            # N = len(self.params["features"])
+            # sh0 = self.sh0_mlp(self.params["features"]).float().reshape((N, 1, 3))
+            # shN = self.shN_mlp(self.params["features"]).float().reshape((N, 15, 3))
+            # colors = torch.cat([sh0, shN], 1)  # [N, K, 3]
+            # colors = torch.cat([self.params["sh0"], self.params["shN"]], 1)  # [N, K, 3]
+        
+        splats = {
+            "means": means,
+            "quats": quats,
+            "scales": scales,
+            "opacities": opacities,
+            "colors": colors,
+        }
 
         rasterize_mode = "antialiased" if self.cfg.antialiased else "classic"
         render_colors, render_alphas, info = rasterization(
@@ -494,7 +547,7 @@ class Runner:
         )
         if masks is not None:
             render_colors[~masks] = 0
-        return render_colors, render_alphas, info
+        return splats, render_colors, render_alphas, info
 
     def train(self):
         cfg = self.cfg
@@ -590,7 +643,7 @@ class Runner:
             sh_degree_to_use = min(step // cfg.sh_degree_interval, cfg.sh_degree)
 
             # forward
-            renders, alphas, info = self.rasterize_splats(
+            splats, renders, alphas, info = self.rasterize_splats(
                 camtoworlds=camtoworlds,
                 Ks=Ks,
                 width=width,
@@ -621,7 +674,7 @@ class Runner:
                 colors = colors + bkgd * (1.0 - alphas)
 
             self.cfg.strategy.step_pre_backward(
-                params=self.splats,
+                params=self.params,
                 optimizers=self.optimizers,
                 state=self.strategy_state,
                 step=step,
@@ -662,12 +715,12 @@ class Runner:
                 loss = (
                     loss
                     + cfg.opacity_reg
-                    * torch.abs(torch.sigmoid(self.splats["opacities"])).mean()
+                    * torch.abs(splats["opacities"]).mean()
                 )
             if cfg.scale_reg > 0.0:
                 loss = (
                     loss
-                    + cfg.scale_reg * torch.abs(torch.exp(self.splats["scales"])).mean()
+                    + cfg.scale_reg * torch.abs(splats["scales"]).mean()
                 )
 
             loss.backward()
@@ -695,7 +748,7 @@ class Runner:
                 self.writer.add_scalar("train/loss", loss.item(), step)
                 self.writer.add_scalar("train/l1loss", l1loss.item(), step)
                 self.writer.add_scalar("train/ssimloss", ssimloss.item(), step)
-                self.writer.add_scalar("train/num_GS", len(self.splats["means"]), step)
+                self.writer.add_scalar("train/num_GS", len(self.params["means"]), step)
                 self.writer.add_scalar("train/mem", mem, step)
                 if cfg.depth_loss:
                     self.writer.add_scalar("train/depthloss", depthloss.item(), step)
@@ -713,7 +766,7 @@ class Runner:
                 stats = {
                     "mem": mem,
                     "ellipse_time": time.time() - global_tic,
-                    "num_GS": len(self.splats["means"]),
+                    "num_GS": len(self.params["means"]),
                 }
                 print("Step: ", step, stats)
                 with open(
@@ -721,7 +774,7 @@ class Runner:
                     "w",
                 ) as f:
                     json.dump(stats, f)
-                data = {"step": step, "splats": self.splats.state_dict()}
+                data = {"step": step, "splats": self.params.state_dict()}
                 if cfg.pose_opt:
                     if world_size > 1:
                         data["pose_adjust"] = self.pose_adjust.module.state_dict()
@@ -740,22 +793,22 @@ class Runner:
             if cfg.sparse_grad:
                 assert cfg.packed, "Sparse gradients only work with packed mode."
                 gaussian_ids = info["gaussian_ids"]
-                for k in self.splats.keys():
-                    grad = self.splats[k].grad
+                for k in self.params.keys():
+                    grad = self.params[k].grad
                     if grad is None or grad.is_sparse:
                         continue
-                    self.splats[k].grad = torch.sparse_coo_tensor(
+                    self.params[k].grad = torch.sparse_coo_tensor(
                         indices=gaussian_ids[None],  # [1, nnz]
                         values=grad[gaussian_ids],  # [nnz, ...]
-                        size=self.splats[k].size(),  # [N, ...]
+                        size=self.params[k].size(),  # [N, ...]
                         is_coalesced=len(Ks) == 1,
                     )
 
             if cfg.visible_adam:
-                gaussian_cnt = self.splats.means.shape[0]
+                gaussian_cnt = self.params.means.shape[0]
                 if cfg.packed:
                     visibility_mask = torch.zeros_like(
-                        self.splats["opacities"], dtype=bool
+                        self.params["opacities"], dtype=bool
                     )
                     visibility_mask.scatter_(0, info["gaussian_ids"], 1)
                 else:
@@ -777,13 +830,16 @@ class Runner:
             for optimizer in self.bil_grid_optimizers:
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)
+            for optimizer in self.mlp_optimizers:
+                optimizer.step()
+                optimizer.zero_grad(set_to_none=True)
             for scheduler in schedulers:
                 scheduler.step()
 
             # Run post-backward steps after backward and optimizer
             if isinstance(self.cfg.strategy, DefaultStrategy):
                 self.cfg.strategy.step_post_backward(
-                    params=self.splats,
+                    params=self.params,
                     optimizers=self.optimizers,
                     state=self.strategy_state,
                     step=step,
@@ -792,8 +848,9 @@ class Runner:
                 )
             elif isinstance(self.cfg.strategy, MCMCStrategy):
                 self.cfg.strategy.step_post_backward(
-                    params=self.splats,
+                    params=self.params,
                     optimizers=self.optimizers,
+                    splats=splats,
                     state=self.strategy_state,
                     step=step,
                     info=info,
@@ -845,7 +902,7 @@ class Runner:
 
             torch.cuda.synchronize()
             tic = time.time()
-            colors, _, _ = self.rasterize_splats(
+            _, colors, _, _ = self.rasterize_splats(
                 camtoworlds=camtoworlds,
                 Ks=Ks,
                 width=width,
@@ -887,7 +944,7 @@ class Runner:
             stats.update(
                 {
                     "ellipse_time": ellipse_time,
-                    "num_GS": len(self.splats["means"]),
+                    "num_GS": len(self.params["means"]),
                 }
             )
             print(
@@ -953,7 +1010,7 @@ class Runner:
             camtoworlds = camtoworlds_all[i : i + 1]
             Ks = K[None]
 
-            renders, _, _ = self.rasterize_splats(
+            _, renders, _, _ = self.rasterize_splats(
                 camtoworlds=camtoworlds,
                 Ks=Ks,
                 width=width,
@@ -984,12 +1041,12 @@ class Runner:
         compress_dir = f"{cfg.result_dir}/compression/rank{world_rank}"
         os.makedirs(compress_dir, exist_ok=True)
 
-        self.compression_method.compress(compress_dir, self.splats)
+        self.compression_method.compress(compress_dir, self.params)
 
         # evaluate compression
         splats_c = self.compression_method.decompress(compress_dir)
         for k in splats_c.keys():
-            self.splats[k].data = splats_c[k].to(self.device)
+            self.params[k].data = splats_c[k].to(self.device)
         self.eval(step=step, stage="compress")
 
     @torch.no_grad()
@@ -1003,7 +1060,7 @@ class Runner:
         c2w = torch.from_numpy(c2w).float().to(self.device)
         K = torch.from_numpy(K).float().to(self.device)
 
-        render_colors, _, _ = self.rasterize_splats(
+        _, render_colors, _, _ = self.rasterize_splats(
             camtoworlds=c2w[None],
             Ks=K[None],
             width=W,
