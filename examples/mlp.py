@@ -18,7 +18,6 @@ Multi Layer Perceptron
 
 from typing import Union
 
-import torch
 from torch import nn
 
 from examples.external import TCNN_EXISTS, tcnn
@@ -125,11 +124,11 @@ def _create_mlp_torch(
     layer_in = in_dim
     for i in range(num_layers):
         layer_out = layer_width if i != num_layers - 1 else out_dim
-        layers.append(torch.nn.Linear(layer_in, layer_out, bias=False))
+        layers.append(nn.Linear(layer_in, layer_out, bias=False))
         if i != num_layers - 1:
-            layers.append(torch.nn.ReLU())
+            layers.append(nn.ReLU())
         layer_in = layer_width
 
     if initialize_last_layer_zeros:
-        torch.nn.init.zeros_(layers[-1].weight)
-    return torch.nn.Sequential(*layers)
+        nn.init.zeros_(layers[-1].weight)
+    return nn.Sequential(*layers)
