@@ -8,6 +8,8 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from matplotlib import colormaps
 
+from examples.mlp import create_mlp
+
 
 class CameraOptModule(torch.nn.Module):
     """Camera pose optimization module."""
@@ -64,16 +66,13 @@ class AppearanceOptModule(torch.nn.Module):
         self.embed_dim = embed_dim
         self.sh_degree = sh_degree
         self.embeds = torch.nn.Embedding(n, embed_dim)
-        layers = []
-        layers.append(
-            torch.nn.Linear(embed_dim + feature_dim + (sh_degree + 1) ** 2, mlp_width)
+        self.color_head = create_mlp(
+            in_dim=embed_dim + feature_dim + (sh_degree + 1) ** 2,
+            num_layers=mlp_depth + 1,
+            layer_width=mlp_width,
+            out_dim=3,
+            initialize_last_layer_zeros=True,
         )
-        layers.append(torch.nn.ReLU(inplace=True))
-        for _ in range(mlp_depth - 1):
-            layers.append(torch.nn.Linear(mlp_width, mlp_width))
-            layers.append(torch.nn.ReLU(inplace=True))
-        layers.append(torch.nn.Linear(mlp_width, 3))
-        self.color_head = torch.nn.Sequential(*layers)
 
     def forward(
         self, features: Tensor, embed_ids: Tensor, dirs: Tensor, sh_degree: int
@@ -110,7 +109,7 @@ class AppearanceOptModule(torch.nn.Module):
             h = torch.cat([embeds, features, sh_bases], dim=-1)  # [C, N, D1 + D2 + K]
         else:
             h = torch.cat([features, sh_bases], dim=-1)
-        colors = self.color_head(h)
+        colors = self.color_head(h.reshape(C * N, -1)).reshape(C, N, -1)
         return colors
 
 
