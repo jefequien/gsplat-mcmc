@@ -21,7 +21,7 @@ from typing import Union
 import torch
 from torch import nn
 
-from gsplat.external import tcnn
+from examples.external import TCNN_EXISTS, tcnn
 
 
 def activation_to_tcnn_string(activation: Union[nn.Module, None]) -> str:
@@ -76,6 +76,23 @@ def create_mlp(
     out_dim: int,
     initialize_last_layer_zeros: bool = False,
 ):
+    if TCNN_EXISTS:
+        return _create_mlp_tcnn(
+            in_dim, num_layers, layer_width, out_dim, initialize_last_layer_zeros
+        )
+    else:
+        return _create_mlp_torch(
+            in_dim, num_layers, layer_width, out_dim, initialize_last_layer_zeros
+        )
+
+
+def _create_mlp_tcnn(
+    in_dim: int,
+    num_layers: int,
+    layer_width: int,
+    out_dim: int,
+    initialize_last_layer_zeros: bool = False,
+):
     """Create a fully-connected neural network with tiny-cuda-nn."""
     network_config = get_tcnn_network_config(
         activation=nn.ReLU(),
@@ -96,7 +113,7 @@ def create_mlp(
     return tcnn_encoding
 
 
-def _create_mlp(
+def _create_mlp_torch(
     in_dim: int,
     num_layers: int,
     layer_width: int,

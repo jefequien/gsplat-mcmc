@@ -9,7 +9,7 @@ pytest <THIS_PY_FILE> -s
 import pytest
 import torch
 
-from gsplat.mlp import create_mlp
+from examples.mlp import _create_mlp_tcnn
 
 device = torch.device("cuda:0")
 
@@ -20,7 +20,7 @@ def test_create_mlp():
     num_layers = 3
     layer_width = 64
     out_dim = 3
-    mlp = create_mlp(
+    mlp_tcnn = _create_mlp_tcnn(
         in_dim=in_dim,
         num_layers=num_layers,
         layer_width=layer_width,
@@ -29,10 +29,10 @@ def test_create_mlp():
     ).to(device)
 
     x = torch.randn(10, 16).to(device)
-    out = mlp(x).float()
+    out = mlp_tcnn(x).float()
     torch.testing.assert_close(out, torch.zeros_like(out), rtol=1e-2, atol=1e-2)
 
-    num_nonzeros = torch.count_nonzero(mlp.params)
+    num_nonzeros = torch.count_nonzero(mlp_tcnn.params)
     expected_nonzeros = (
         in_dim * layer_width + (num_layers - 2) * layer_width * layer_width
     )

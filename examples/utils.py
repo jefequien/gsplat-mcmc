@@ -7,7 +7,8 @@ from torch import Tensor
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from matplotlib import colormaps
-from gsplat.mlp import create_mlp
+
+from examples.mlp import create_mlp
 
 
 class CameraOptModule(torch.nn.Module):
