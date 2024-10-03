@@ -1,9 +1,14 @@
 SCENE_DIR="data/360_v2"
-SCENE_LIST="garden" # bicycle stump bonsai counter kitchen room treehill flowers"
+SCENE_LIST="garden bicycle stump bonsai counter kitchen room treehill flowers"
 RENDER_TRAJ_PATH="ellipse"
 
+# 1M GSs
 RESULT_DIR="results/benchmark_mcmc_1M_neural"
 CAP_MAX=1000000
+
+# # 2M GSs
+# RESULT_DIR="results/benchmark_mcmc_2M_neural"
+# CAP_MAX=2000000
 
 for SCENE in $SCENE_LIST;
 do
