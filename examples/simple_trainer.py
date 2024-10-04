@@ -231,8 +231,8 @@ def create_splats_with_optimizers(
         ("means", torch.nn.Parameter(points), 1.6e-4 * scene_scale),
         ("opacities", torch.nn.Parameter(opacities), 5e-2),
         ("features", torch.nn.Parameter(features), 2.5e-3),
-        ("scales", torch.nn.Parameter(scales), 5e-3),
-        ("quats", torch.nn.Parameter(quats), 1e-3),
+        # ("scales", torch.nn.Parameter(scales), 5e-3),
+        # ("quats", torch.nn.Parameter(quats), 1e-3),
     ]
 
     # if feature_dim is None:
@@ -338,11 +338,11 @@ class Runner:
             world_rank=world_rank,
             world_size=world_size,
         )
-        # self.quats_mlp = create_mlp(in_dim=32, num_layers=2, layer_width=64, out_dim=4).to(self.device)
-        # self.scales_mlp = create_mlp(in_dim=32, num_layers=2, layer_width=64, out_dim=3).to(self.device)
+        self.quats_mlp = create_mlp(in_dim=32, num_layers=2, layer_width=64, out_dim=4).to(self.device)
+        self.scales_mlp = create_mlp(in_dim=32, num_layers=2, layer_width=64, out_dim=3).to(self.device)
         # self.opacities_mlp = create_mlp(in_dim=32, num_layers=2, layer_width=64, out_dim=1).to(self.device)
-        self.sh0_mlp = create_mlp(in_dim=32+3, num_layers=2, layer_width=64, out_dim=3).to(self.device)
-        # self.shN_mlp = create_mlp(in_dim=32, num_layers=2, layer_width=64, out_dim=45).to(self.device)
+        self.sh0_mlp = create_mlp(in_dim=32, num_layers=2, layer_width=64, out_dim=3).to(self.device)
+        self.shN_mlp = create_mlp(in_dim=32, num_layers=2, layer_width=64, out_dim=45, initialize_last_layer_zeros=True).to(self.device)
         print("Model initialized. Number of GS:", len(self.params["means"]))
 
         # Densification Strategy
@@ -422,14 +422,14 @@ class Runner:
             ]
         
         self.mlp_optimizers = [
-            # torch.optim.Adam(
-            #     self.quats_mlp.parameters(),
-            #     lr=1e-3 * math.sqrt(cfg.batch_size),
-            # ),
-            # torch.optim.Adam(
-            #     self.scales_mlp.parameters(),
-            #     lr=5e-3 * math.sqrt(cfg.batch_size),
-            # ),
+            torch.optim.Adam(
+                self.quats_mlp.parameters(),
+                lr=1e-3 * math.sqrt(cfg.batch_size),
+            ),
+            torch.optim.Adam(
+                self.scales_mlp.parameters(),
+                lr=5e-3 * math.sqrt(cfg.batch_size),
+            ),
             # torch.optim.Adam(
             #     self.opacities_mlp.parameters(),
             #     lr=5e-2 * math.sqrt(cfg.batch_size),
@@ -438,10 +438,10 @@ class Runner:
                 self.sh0_mlp.parameters(),
                 lr=2.5e-3 * math.sqrt(cfg.batch_size),
             ),
-            # torch.optim.Adam(
-            #     self.shN_mlp.parameters(),
-            #     lr=(2.5e-3 / 20) * math.sqrt(cfg.batch_size),
-            # ),
+            torch.optim.Adam(
+                self.shN_mlp.parameters(),
+                lr=(2.5e-3 / 20) * math.sqrt(cfg.batch_size),
+            ),
         ]
 
         # Losses & Metrics.
@@ -481,12 +481,12 @@ class Runner:
         means = self.params["means"]  # [N, 3]
         # quats = F.normalize(self.params["quats"], dim=-1)  # [N, 4]
         # rasterization does normalization internally
-        quats = self.params["quats"]  # [N, 4]
-        scales = torch.exp(self.params["scales"])  # [N, 3]
+        # quats = self.params["quats"]  # [N, 4]
+        # scales = torch.exp(self.params["scales"])  # [N, 3]
         opacities = torch.sigmoid(self.params["opacities"])  # [N,]
         
-        # quats = self.quats_mlp(self.params["features"]).float()
-        # scales = torch.exp(self.scales_mlp(self.params["features"]).float() - 5.)
+        quats = self.quats_mlp(self.params["features"]).float()
+        scales = torch.exp(self.scales_mlp(self.params["features"]).float() - 5.)
         # opacities = torch.sigmoid(self.opacities_mlp(self.params["features"]).float().reshape(-1))
 
         image_ids = kwargs.pop("image_ids", None)
@@ -500,16 +500,16 @@ class Runner:
             colors = colors + self.params["colors"]
             colors = torch.sigmoid(colors)
         else:
-            N = len(self.params["features"])
-            dirs = F.normalize(means[None, :, :] - camtoworlds[:, None, :3, 3], dim=-1)[0]
-            sh0_input = torch.cat([dirs, self.params["features"]], dim=1)
-            colors = self.sh0_mlp(sh0_input).float().reshape((N, 1, 3))
-            colors = torch.sigmoid(colors)
-            
             # N = len(self.params["features"])
-            # sh0 = self.sh0_mlp(self.params["features"]).float().reshape((N, 1, 3))
-            # shN = self.shN_mlp(self.params["features"]).float().reshape((N, 15, 3))
-            # colors = torch.cat([sh0, shN], 1)  # [N, K, 3]
+            # dirs = F.normalize(means[None, :, :] - camtoworlds[:, None, :3, 3], dim=-1)[0]
+            # sh0_input = torch.cat([dirs, self.params["features"]], dim=1)
+            # colors = self.sh0_mlp(sh0_input).float().reshape((N, 1, 3))
+            # colors = torch.sigmoid(colors)
+            
+            N = len(self.params["features"])
+            sh0 = self.sh0_mlp(self.params["features"]).float().reshape((N, 1, 3))
+            shN = self.shN_mlp(self.params["features"]).float().reshape((N, 15, 3))
+            colors = torch.cat([sh0, shN], 1)  # [N, K, 3]
             # colors = torch.cat([self.params["sh0"], self.params["shN"]], 1)  # [N, K, 3]
         
         splats = {
