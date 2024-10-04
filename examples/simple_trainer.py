@@ -224,7 +224,7 @@ def create_splats_with_optimizers(
     N = points.shape[0]
     quats = torch.rand((N, 4))  # [N, 4]
     opacities = torch.logit(torch.full((N,), init_opacity))  # [N,]
-    features = torch.rand(N, 32)
+    features = torch.rand(N, feature_dim)
 
     params = [
         # name, value, lr
@@ -320,7 +320,7 @@ class Runner:
         print("Scene scale:", self.scene_scale)
 
         # Model
-        feature_dim = 32 if cfg.app_opt else None
+        feature_dim = 32 # if cfg.app_opt else None
         self.params, self.optimizers = create_splats_with_optimizers(
             self.parser,
             init_type=cfg.init_type,
@@ -338,11 +338,11 @@ class Runner:
             world_rank=world_rank,
             world_size=world_size,
         )
-        self.quats_mlp = create_mlp(in_dim=32, num_layers=2, layer_width=64, out_dim=4).to(self.device)
-        self.scales_mlp = create_mlp(in_dim=32, num_layers=2, layer_width=64, out_dim=3).to(self.device)
-        # self.opacities_mlp = create_mlp(in_dim=32, num_layers=2, layer_width=64, out_dim=1).to(self.device)
-        self.sh0_mlp = create_mlp(in_dim=32, num_layers=2, layer_width=64, out_dim=3).to(self.device)
-        self.shN_mlp = create_mlp(in_dim=32, num_layers=2, layer_width=64, out_dim=45, initialize_last_layer_zeros=True).to(self.device)
+        self.quats_mlp = create_mlp(in_dim=feature_dim, num_layers=3, layer_width=64, out_dim=4).to(self.device)
+        self.scales_mlp = create_mlp(in_dim=feature_dim, num_layers=3, layer_width=64, out_dim=3).to(self.device)
+        # self.opacities_mlp = create_mlp(in_dim=feature_dim, num_layers=3, layer_width=64, out_dim=1).to(self.device)
+        self.sh0_mlp = create_mlp(in_dim=feature_dim, num_layers=3, layer_width=64, out_dim=3).to(self.device)
+        self.shN_mlp = create_mlp(in_dim=feature_dim, num_layers=3, layer_width=64, out_dim=45, initialize_last_layer_zeros=True).to(self.device)
         print("Model initialized. Number of GS:", len(self.params["means"]))
 
         # Densification Strategy
