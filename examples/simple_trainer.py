@@ -35,6 +35,7 @@ from lib_bilagrid import (
     color_correct,
     total_variation_loss,
 )
+from background_opt import BackgroundOptModule
 
 from gsplat.compression import PngCompression
 from gsplat.distributed import cli
@@ -146,6 +147,11 @@ class Config:
     app_opt_lr: float = 1e-3
     # Regularization for appearance optimization as weight decay
     app_opt_reg: float = 1e-6
+
+    # Enable background optimization. (experimental)
+    bkgd_opt: bool = False
+    # Learning rate for background optimization
+    bkgd_opt_lr: float = 1e-3
 
     # Enable bilateral grid. (experimental)
     use_bilateral_grid: bool = False
@@ -414,6 +420,15 @@ class Runner:
                     eps=1e-15,
                 ),
             ]
+        self.bkgd_optimizers = []
+        if cfg.bkgd_opt:
+            self.bkgd_module = BackgroundOptModule(len(self.trainset)).to(self.device)
+            self.bkgd_optimizers = [
+                torch.optim.Adam(
+                    self.bkgd_module.parameters(),
+                    lr=cfg.bkgd_opt_lr * math.sqrt(cfg.batch_size),
+                )
+            ]
 
         # Losses & Metrics.
         self.ssim = StructuralSimilarityIndexMeasure(data_range=1.0).to(self.device)
@@ -599,7 +614,7 @@ class Runner:
                 near_plane=cfg.near_plane,
                 far_plane=cfg.far_plane,
                 image_ids=image_ids,
-                render_mode="RGB+ED" if cfg.depth_loss else "RGB",
+                render_mode="RGB+ED",  # if cfg.depth_loss else "RGB",
                 masks=masks,
             )
             if renders.shape[-1] == 4:
@@ -618,6 +633,10 @@ class Runner:
 
             if cfg.random_bkgd:
                 bkgd = torch.rand(1, 3, device=device)
+                colors = colors + bkgd * (1.0 - alphas)
+
+            if cfg.bkgd_opt:
+                bkgd = self.bkgd_module(image_ids, depths)
                 colors = colors + bkgd * (1.0 - alphas)
 
             self.cfg.strategy.step_pre_backward(
@@ -732,6 +751,11 @@ class Runner:
                         data["app_module"] = self.app_module.module.state_dict()
                     else:
                         data["app_module"] = self.app_module.state_dict()
+                if cfg.bkgd_opt:
+                    if world_size > 1:
+                        data["bkgd_module"] = self.bkgd_module.module.state_dict()
+                    else:
+                        data["bkgd_module"] = self.bkgd_module.state_dict()
                 torch.save(
                     data, f"{self.ckpt_dir}/ckpt_{step}_rank{self.world_rank}.pt"
                 )
@@ -772,6 +796,9 @@ class Runner:
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)
             for optimizer in self.app_optimizers:
+                optimizer.step()
+                optimizer.zero_grad(set_to_none=True)
+            for optimizer in self.bkgd_optimizers:
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)
             for optimizer in self.bil_grid_optimizers:
