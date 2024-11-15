@@ -1,8 +1,9 @@
 SCENE_DIR="data/360_v2"
-RESULT_DIR="results/benchmark_mcmc_1M_app"
 SCENE_LIST="garden bicycle stump bonsai counter kitchen room treehill flowers"
 RENDER_TRAJ_PATH="ellipse"
 
+# 1M GSs
+RESULT_DIR="results/benchmark_mcmc_1M_mlp_png_compression"
 CAP_MAX=1000000
 
 for SCENE in $SCENE_LIST;
@@ -23,3 +24,12 @@ do
         --data_dir $SCENE_DIR/$SCENE/ \
         --result_dir $RESULT_DIR/$SCENE/
 done
+
+# Zip the compressed files and summarize the stats
+if command -v zip &> /dev/null
+then
+    echo "Zipping results"
+    python benchmarks/compression/summarize_stats.py --results_dir $RESULT_DIR
+else
+    echo "zip command not found, skipping zipping"
+fi

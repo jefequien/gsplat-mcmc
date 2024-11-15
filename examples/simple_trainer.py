@@ -141,6 +141,8 @@ class Config:
 
     # Enable appearance optimization. (experimental)
     app_opt: bool = False
+    # Appearance feature dimension
+    app_feature_dim: int = 32
     # Appearance embedding dimension
     app_embed_dim: int = 16
     # Learning rate for appearance optimization
@@ -203,7 +205,6 @@ def create_splats_with_optimizers(
     sparse_grad: bool = False,
     visible_adam: bool = False,
     batch_size: int = 1,
-    feature_dim: Optional[int] = None,
     device: str = "cuda",
     world_rank: int = 0,
     world_size: int = 1,
@@ -241,8 +242,7 @@ def create_splats_with_optimizers(
 
     if cfg.app_opt:
         # features will be used for appearance and view-dependent shading
-        feature_dim = 32
-        features = torch.rand(N, feature_dim)  # [N, feature_dim]
+        features = torch.rand(N, cfg.app_feature_dim)  # [N, feature_dim]
         params.append(("features", torch.nn.Parameter(features), 2.5e-3))
         colors = torch.logit(rgbs)  # [N, 3]
         params.append(("colors", torch.nn.Parameter(colors), 2.5e-3))
@@ -390,9 +390,11 @@ class Runner:
 
         self.app_optimizers = []
         if cfg.app_opt:
-            assert feature_dim is not None
             self.app_module = AppearanceOptModule(
-                len(self.trainset), feature_dim, cfg.app_embed_dim, cfg.sh_degree
+                len(self.trainset),
+                cfg.app_feature_dim,
+                cfg.app_embed_dim,
+                cfg.sh_degree,
             ).to(self.device)
             self.app_optimizers = [
                 torch.optim.Adam(
