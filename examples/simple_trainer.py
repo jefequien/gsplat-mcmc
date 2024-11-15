@@ -191,6 +191,7 @@ class Config:
 
 
 def create_splats_with_optimizers(
+    cfg: Config,
     parser: Parser,
     init_type: str = "sfm",
     init_num_pts: int = 100_000,
@@ -238,18 +239,24 @@ def create_splats_with_optimizers(
         ("opacities", torch.nn.Parameter(opacities), 5e-2),
     ]
 
-    # if feature_dim is None:
-    # color is SH coefficients.
-    colors = torch.zeros((N, (sh_degree + 1) ** 2, 3))  # [N, K, 3]
-    colors[:, 0, :] = rgb_to_sh(rgbs)
-    params.append(("sh0", torch.nn.Parameter(colors[:, :1, :]), 2.5e-3))
-    # params.append(("shN", torch.nn.Parameter(colors[:, 1:, :]), 2.5e-3 / 20))
-    # else:
-    #     # features will be used for appearance and view-dependent shading
-    #     features = torch.rand(N, feature_dim)  # [N, feature_dim]
-    #     params.append(("features", torch.nn.Parameter(features), 2.5e-3))
-    #     colors = torch.logit(rgbs)  # [N, 3]
-    #     params.append(("colors", torch.nn.Parameter(colors), 2.5e-3))
+    if cfg.app_opt:
+        # features will be used for appearance and view-dependent shading
+        feature_dim = 32
+        features = torch.rand(N, feature_dim)  # [N, feature_dim]
+        params.append(("features", torch.nn.Parameter(features), 2.5e-3))
+        colors = torch.logit(rgbs)  # [N, 3]
+        params.append(("colors", torch.nn.Parameter(colors), 2.5e-3))
+    elif cfg.mlp_opt:
+        # color is SH coefficients.
+        colors = torch.zeros((N, (sh_degree + 1) ** 2, 3))  # [N, K, 3]
+        colors[:, 0, :] = rgb_to_sh(rgbs)
+        params.append(("sh0", torch.nn.Parameter(colors[:, :1, :]), 2.5e-3))
+    else:
+        # color is SH coefficients.
+        colors = torch.zeros((N, (sh_degree + 1) ** 2, 3))  # [N, K, 3]
+        colors[:, 0, :] = rgb_to_sh(rgbs)
+        params.append(("sh0", torch.nn.Parameter(colors[:, :1, :]), 2.5e-3))
+        params.append(("shN", torch.nn.Parameter(colors[:, 1:, :]), 2.5e-3 / 20))
 
     splats = torch.nn.ParameterDict({n: v for n, v, _ in params}).to(device)
     # Scale learning rate based on batch size, reference:
@@ -322,8 +329,8 @@ class Runner:
         print("Scene scale:", self.scene_scale)
 
         # Model
-        feature_dim = 32 if cfg.app_opt else None
         self.splats, self.optimizers = create_splats_with_optimizers(
+            cfg,
             self.parser,
             init_type=cfg.init_type,
             init_num_pts=cfg.init_num_pts,
@@ -335,7 +342,6 @@ class Runner:
             sparse_grad=cfg.sparse_grad,
             visible_adam=cfg.visible_adam,
             batch_size=cfg.batch_size,
-            feature_dim=feature_dim,
             device=self.device,
             world_rank=world_rank,
             world_size=world_size,
@@ -482,7 +488,7 @@ class Runner:
             colors = colors + self.splats["colors"]
             colors = torch.sigmoid(colors)
         elif self.cfg.mlp_opt:
-            shN = self.app_module.predict_sh(means, self.splats["sh0"])
+            shN = self.mlp_module.predict_shN(means, self.splats["sh0"])
             colors = torch.cat([self.splats["sh0"], shN], 1)  # [N, K, 3]
         else:
             colors = torch.cat([self.splats["sh0"], self.splats["shN"]], 1)  # [N, K, 3]
