@@ -12,7 +12,7 @@ class BackgroundOptModule(nn.Module):
 
     def __init__(self, n: int, embed_dim: int = 4):
         super().__init__()
-        # self.embeds = torch.nn.Embedding(n, embed_dim)
+        self.embeds = torch.nn.Embedding(n, embed_dim)
         self.depths_encoder = get_encoder(num_freqs=3, input_dims=1)
         # self.rays_encoder = get_encoder(num_freqs=3, input_dims=3)
         self.bkgd_mlp = create_mlp(
@@ -22,18 +22,19 @@ class BackgroundOptModule(nn.Module):
             out_dim=3,
         )
         self.mask_mlp = create_mlp(
-            in_dim=self.depths_encoder.out_dim + 4,
+            in_dim=self.depths_encoder.out_dim + 1,
             num_layers=5,
             layer_width=64,
             out_dim=1,
         )
-        # self.bounded_l1_loss = bounded_l1_loss(-10.0, 0.5)
+        # self.bounded_l1_loss = bounded_l1_loss(10.0, 0.5)
 
     def zero_init(self):
         torch.nn.init.zeros_(self.embeds.weight)
 
     def forward(
         self,
+        image_ids: Tensor,
         depths: Tensor,
         camtoworlds: Tensor,
         Ks: Tensor,
@@ -42,7 +43,7 @@ class BackgroundOptModule(nn.Module):
     ):
         # depths_emb = self.depths_encoder.encode(log_transform(depths))
         # images_emb = self.embeds(image_ids).repeat(*depths_emb.shape[:-1], 1)
-        height, width = depths.shape[1:3]
+        # height, width = depths.shape[1:3]
         rays = depth_to_rays(
             depths,
             camtoworlds,
@@ -51,19 +52,22 @@ class BackgroundOptModule(nn.Module):
             far_plane=far_plane,
         )
         rays = F.normalize(rays, dim=-1)
+
+        # images_emb = self.embeds(image_ids).repeat(*depths.shape[:-1], 1)
         # rays_emb = self.rays_encoder.encode(rays)
         mlp_in = torch.cat([rays], dim=-1)
         mlp_out = self.bkgd_mlp(mlp_in.reshape(-1, mlp_in.shape[-1])).reshape(
-            1, height, width, -1
+            *depths.shape[:-1], -1
         )
         bkgd = torch.sigmoid(mlp_out)
+        bkgd = torch.ones_like(bkgd)
         return bkgd
 
     def predict_mask(self, colors: Tensor, alphas: Tensor, depths: Tensor):
         height, width = depths.shape[1:3]
 
         depths_emb = self.depths_encoder.encode(log_transform(depths))
-        mlp_in = torch.cat([colors, alphas, depths_emb], dim=-1)
+        mlp_in = torch.cat([alphas, depths_emb], dim=-1)
         mlp_out = self.mask_mlp(mlp_in.reshape(-1, mlp_in.shape[-1])).reshape(
             1, height, width, -1
         )
@@ -78,6 +82,26 @@ class BackgroundOptModule(nn.Module):
     #     x = blur_mask.mean()
     #     print(x)
     #     return self.bounded_l1_loss(x)
+
+    def alpha_loss(self, alphas: Tensor, bkgd: Tensor, pixels: Tensor):
+        # for those pixel are well represented by bg and has low alpha, we encourage the gaussian to be transparent
+        bg_mask = torch.abs(pixels - bkgd).mean(dim=-1, keepdim=True) < 0.003
+        # use a box filter to avoid penalty high frequency parts
+        f = 3
+        window = (torch.ones((f, f)).view(1, 1, f, f) / (f * f)).cuda()
+        bg_mask = torch.nn.functional.conv2d(
+            bg_mask.float().permute(0, 3, 1, 2),
+            window,
+            stride=1,
+            padding="same",
+        ).permute(0, 2, 3, 1)
+        alpha_mask = bg_mask > 0.6
+        # prevent NaN
+        if alpha_mask.sum() != 0:
+            alphaloss = alphas[alpha_mask].mean() * 0.15
+        else:
+            alphaloss = torch.tensor(0.0).to(alphas.device)
+        return alphaloss
 
 
 def bounded_l1_loss(lambda_a: float, lambda_b: float, eps: float = 1e-2):

@@ -1,6 +1,6 @@
 SCENE_DIR="data/360_v2"
 RESULT_DIR="results/benchmark_mcmc_1M_bkgd"
-SCENE_LIST="garden bicycle stump bonsai counter kitchen room" # treehill flowers
+SCENE_LIST="bicycle garden stump bonsai counter kitchen room" # treehill flowers
 RENDER_TRAJ_PATH="ellipse"
 
 CAP_MAX=1000000

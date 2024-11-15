@@ -642,6 +642,7 @@ class Runner:
 
             if cfg.bkgd_opt:
                 bkgd = self.bkgd_module(
+                    image_ids,
                     depths,
                     camtoworlds,
                     Ks,
@@ -687,8 +688,11 @@ class Runner:
             if cfg.use_bilateral_grid:
                 tvloss = 10 * total_variation_loss(self.bil_grids.grids)
                 loss += tvloss
-            # if cfg.bkgd_opt:
-            #     loss += 0.001 * self.bkgd_module.mask_loss(bkgd_mask)
+            if cfg.bkgd_opt:
+                # loss += 0.001 * self.bkgd_module.mask_loss(bkgd_mask)
+                alphaloss = self.bkgd_module.alpha_loss(alphas, bkgd, pixels)
+                print(alphaloss)
+                loss += alphaloss
 
             # regularizations
             if cfg.opacity_reg > 0.0:
@@ -845,9 +849,10 @@ class Runner:
 
             # eval the full set
             if step in [i - 1 for i in cfg.eval_steps]:
-                self.eval(step, stage="train")
                 self.eval(step, stage="val")
                 self.render_traj(step)
+            if step % 1000 == 0:
+                self.eval(step, stage="train")
 
             # run compression
             if cfg.compression is not None and step in [i - 1 for i in cfg.eval_steps]:
@@ -880,6 +885,9 @@ class Runner:
         ellipse_time = 0
         metrics = defaultdict(list)
         for i, data in enumerate(dataloader):
+            if stage == "train" and i % 10 != 0:
+                continue
+            image_ids = data["image_id"].to(device)
             camtoworlds = data["camtoworld"].to(device)
             Ks = data["K"].to(device)
             pixels = data["image"].to(device) / 255.0
@@ -910,8 +918,9 @@ class Runner:
             colors = torch.clamp(colors, 0.0, 1.0)
             canvas_list = [pixels, colors]
 
-            if cfg.bkgd_opt:
+            if cfg.bkgd_opt and stage == "train":
                 bkgd = self.bkgd_module(
+                    image_ids,
                     depths,
                     camtoworlds,
                     Ks,
@@ -1082,15 +1091,6 @@ class Runner:
             colors, depths = renders[..., 0:3], renders[..., 3:4]
         else:
             colors, depths = renders, None
-        if cfg.bkgd_opt:
-            bkgd = self.bkgd_module(
-                depths,
-                camtoworlds,
-                Ks,
-                near_plane=cfg.near_plane,
-                far_plane=cfg.far_plane,
-            )
-            colors = colors + bkgd * (1.0 - alphas)
         return colors[0].cpu().numpy()
 
 
