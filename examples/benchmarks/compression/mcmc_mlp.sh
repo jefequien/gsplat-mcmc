@@ -30,7 +30,7 @@ do
         --result_dir $RESULT_DIR/$SCENE/ \
         --lpips_net vgg \
         --compression png \
-        --ckpt $RESULT_DIR/$SCENE/ckpts/ckpt_6999_rank0.pt
+        --ckpt $RESULT_DIR/$SCENE/ckpts/ckpt_29999_rank0.pt
 done
 
 # Zip the compressed files and summarize the stats
