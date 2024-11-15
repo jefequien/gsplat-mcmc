@@ -8,7 +8,8 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from matplotlib import colormaps
 
-from examples.mlp import create_mlp
+from examples.mlp import create_mlp, get_encoder
+from gsplat.utils import log_transform
 
 
 class CameraOptModule(torch.nn.Module):
@@ -71,7 +72,14 @@ class AppearanceOptModule(torch.nn.Module):
             num_layers=mlp_depth + 1,
             layer_width=mlp_width,
             out_dim=3,
-            initialize_last_layer_zeros=True,
+        )
+
+        self.means_encoder = get_encoder(num_freqs=3, input_dims=3)
+        self.sh_mlp = create_mlp(
+            in_dim=self.means_encoder.out_dim + 3,
+            num_layers=5,
+            layer_width=64,
+            out_dim=((sh_degree + 1) ** 2 - 1) * 3,
         )
 
     def forward(
@@ -111,6 +119,13 @@ class AppearanceOptModule(torch.nn.Module):
             h = torch.cat([features, sh_bases], dim=-1)
         colors = self.color_head(h.reshape(C * N, -1)).reshape(C, N, -1)
         return colors
+
+    def predict_sh(self, means: Tensor, colors: Tensor):
+        means_emb = self.means_encoder.encode(log_transform(means))
+        colors_emb = colors[:, 0, :]
+        mlp_in = torch.cat([means_emb, colors_emb], dim=-1)
+        shN = self.sh_mlp(mlp_in).reshape(-1, 15, 3)
+        return shN
 
 
 def rotation_6d_to_matrix(d6: Tensor) -> Tensor:

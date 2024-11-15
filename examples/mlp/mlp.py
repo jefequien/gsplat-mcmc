@@ -20,7 +20,7 @@ from typing import Union
 
 from torch import nn
 
-from examples.external import TCNN_EXISTS, tcnn
+from examples.mlp.external import TCNN_EXISTS, tcnn
 
 
 def activation_to_tcnn_string(activation: Union[nn.Module, None]) -> str:
@@ -36,7 +36,7 @@ def activation_to_tcnn_string(activation: Union[nn.Module, None]) -> str:
     if isinstance(activation, nn.ReLU):
         return "ReLU"
     if isinstance(activation, nn.LeakyReLU):
-        return "Leaky ReLU"
+        return "LeakyReLU"
     if isinstance(activation, nn.Sigmoid):
         return "Sigmoid"
     if isinstance(activation, nn.Softplus):
@@ -73,15 +73,23 @@ def create_mlp(
     num_layers: int,
     layer_width: int,
     out_dim: int,
-    initialize_last_layer_zeros: bool = False,
+    initialize_last_layer_zeros: bool = True,
 ):
     if TCNN_EXISTS:
         return _create_mlp_tcnn(
-            in_dim, num_layers, layer_width, out_dim, initialize_last_layer_zeros
+            in_dim,
+            num_layers,
+            layer_width,
+            out_dim,
+            initialize_last_layer_zeros=initialize_last_layer_zeros,
         )
     else:
         return _create_mlp_torch(
-            in_dim, num_layers, layer_width, out_dim, initialize_last_layer_zeros
+            in_dim,
+            num_layers,
+            layer_width,
+            out_dim,
+            initialize_last_layer_zeros=initialize_last_layer_zeros,
         )
 
 
@@ -90,11 +98,11 @@ def _create_mlp_tcnn(
     num_layers: int,
     layer_width: int,
     out_dim: int,
-    initialize_last_layer_zeros: bool = False,
+    initialize_last_layer_zeros: bool = True,
 ):
     """Create a fully-connected neural network with tiny-cuda-nn."""
     network_config = get_tcnn_network_config(
-        activation=nn.ReLU(),
+        activation=nn.LeakyReLU(),
         out_activation=None,
         layer_width=layer_width,
         num_layers=num_layers,
@@ -105,6 +113,7 @@ def _create_mlp_tcnn(
         network_config=network_config,
     )
     if initialize_last_layer_zeros:
+        print("Initializing last layer")
         # tcnn always pads the output layer's width to a multiple of 16
         params = tcnn_encoding.state_dict()["params"]
         params[-1 * (layer_width * 16 * (out_dim // 16 + 1)) :] = 0
@@ -117,7 +126,7 @@ def _create_mlp_torch(
     num_layers: int,
     layer_width: int,
     out_dim: int,
-    initialize_last_layer_zeros: bool = False,
+    initialize_last_layer_zeros: bool = True,
 ):
     """Create a fully-connected neural network with PyTorch."""
     layers = []
@@ -126,9 +135,8 @@ def _create_mlp_torch(
         layer_out = layer_width if i != num_layers - 1 else out_dim
         layers.append(nn.Linear(layer_in, layer_out, bias=False))
         if i != num_layers - 1:
-            layers.append(nn.ReLU())
+            layers.append(nn.LeakyReLU())
         layer_in = layer_width
-
     if initialize_last_layer_zeros:
         nn.init.zeros_(layers[-1].weight)
     return nn.Sequential(*layers)

@@ -29,6 +29,7 @@ from fused_ssim import fused_ssim
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 from typing_extensions import Literal, assert_never
 from utils import AppearanceOptModule, CameraOptModule, knn, rgb_to_sh, set_random_seed
+from mlp_opt import MlpOptModule
 from lib_bilagrid import (
     BilateralGrid,
     slice,
@@ -82,7 +83,7 @@ class Config:
     # Number of training steps
     max_steps: int = 30_000
     # Steps to evaluate the model
-    eval_steps: List[int] = field(default_factory=lambda: [7_000, 30_000])
+    eval_steps: List[int] = field(default_factory=lambda: [7_000, 15_000, 30_000])
     # Steps to save the model
     save_steps: List[int] = field(default_factory=lambda: [7_000, 30_000])
 
@@ -151,6 +152,11 @@ class Config:
     use_bilateral_grid: bool = False
     # Shape of the bilateral grid (X, Y, W)
     bilateral_grid_shape: Tuple[int, int, int] = (16, 16, 8)
+
+    # Enable MLP optimization. (experimental)
+    mlp_opt: bool = False
+    # Learning rate for MLP optimization
+    mlp_opt_lr: float = 1e-3
 
     # Enable depth loss. (experimental)
     depth_loss: bool = False
@@ -232,18 +238,18 @@ def create_splats_with_optimizers(
         ("opacities", torch.nn.Parameter(opacities), 5e-2),
     ]
 
-    if feature_dim is None:
-        # color is SH coefficients.
-        colors = torch.zeros((N, (sh_degree + 1) ** 2, 3))  # [N, K, 3]
-        colors[:, 0, :] = rgb_to_sh(rgbs)
-        params.append(("sh0", torch.nn.Parameter(colors[:, :1, :]), 2.5e-3))
-        params.append(("shN", torch.nn.Parameter(colors[:, 1:, :]), 2.5e-3 / 20))
-    else:
-        # features will be used for appearance and view-dependent shading
-        features = torch.rand(N, feature_dim)  # [N, feature_dim]
-        params.append(("features", torch.nn.Parameter(features), 2.5e-3))
-        colors = torch.logit(rgbs)  # [N, 3]
-        params.append(("colors", torch.nn.Parameter(colors), 2.5e-3))
+    # if feature_dim is None:
+    # color is SH coefficients.
+    colors = torch.zeros((N, (sh_degree + 1) ** 2, 3))  # [N, K, 3]
+    colors[:, 0, :] = rgb_to_sh(rgbs)
+    params.append(("sh0", torch.nn.Parameter(colors[:, :1, :]), 2.5e-3))
+    # params.append(("shN", torch.nn.Parameter(colors[:, 1:, :]), 2.5e-3 / 20))
+    # else:
+    #     # features will be used for appearance and view-dependent shading
+    #     features = torch.rand(N, feature_dim)  # [N, feature_dim]
+    #     params.append(("features", torch.nn.Parameter(features), 2.5e-3))
+    #     colors = torch.logit(rgbs)  # [N, 3]
+    #     params.append(("colors", torch.nn.Parameter(colors), 2.5e-3))
 
     splats = torch.nn.ParameterDict({n: v for n, v, _ in params}).to(device)
     # Scale learning rate based on batch size, reference:
@@ -412,6 +418,18 @@ class Runner:
                 ),
             ]
 
+        self.mlp_optimizers = []
+        if cfg.mlp_opt:
+            self.mlp_module = MlpOptModule(cfg.sh_degree).to(self.device)
+            self.mlp_optimizers = [
+                torch.optim.Adam(
+                    self.mlp_module.parameters(),
+                    lr=cfg.mlp_opt_lr * math.sqrt(cfg.batch_size),
+                ),
+            ]
+            if world_size > 1:
+                self.mlp_module = DDP(self.mlp_module)
+
         # Losses & Metrics.
         self.ssim = StructuralSimilarityIndexMeasure(data_range=1.0).to(self.device)
         self.psnr = PeakSignalNoiseRatio(data_range=1.0).to(self.device)
@@ -463,6 +481,9 @@ class Runner:
             )
             colors = colors + self.splats["colors"]
             colors = torch.sigmoid(colors)
+        elif self.cfg.mlp_opt:
+            shN = self.app_module.predict_sh(means, self.splats["sh0"])
+            colors = torch.cat([self.splats["sh0"], shN], 1)  # [N, K, 3]
         else:
             colors = torch.cat([self.splats["sh0"], self.splats["shN"]], 1)  # [N, K, 3]
 
@@ -729,6 +750,11 @@ class Runner:
                         data["app_module"] = self.app_module.module.state_dict()
                     else:
                         data["app_module"] = self.app_module.state_dict()
+                if cfg.mlp_opt:
+                    if world_size > 1:
+                        data["mlp_module"] = self.mlp_module.module.state_dict()
+                    else:
+                        data["mlp_module"] = self.mlp_module.state_dict()
                 torch.save(
                     data, f"{self.ckpt_dir}/ckpt_{step}_rank{self.world_rank}.pt"
                 )
@@ -769,6 +795,9 @@ class Runner:
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)
             for optimizer in self.app_optimizers:
+                optimizer.step()
+                optimizer.zero_grad(set_to_none=True)
+            for optimizer in self.mlp_optimizers:
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)
             for optimizer in self.bil_grid_optimizers:
