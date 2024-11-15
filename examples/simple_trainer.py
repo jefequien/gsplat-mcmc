@@ -83,7 +83,9 @@ class Config:
     # Number of training steps
     max_steps: int = 30_000
     # Steps to evaluate the model
-    eval_steps: List[int] = field(default_factory=lambda: [7_000, 30_000])
+    eval_steps: List[int] = field(
+        default_factory=lambda: [3_000, 7_000, 15_000, 30_000]
+    )
     # Steps to save the model
     save_steps: List[int] = field(default_factory=lambda: [7_000, 30_000])
 
@@ -289,6 +291,9 @@ class Runner:
         self.local_rank = local_rank
         self.world_size = world_size
         self.device = f"cuda:{local_rank}"
+        self.render_mode = "RGB"
+        if cfg.depth_loss or cfg.bkgd_opt:
+            self.render_mode = "RGB+ED"
 
         # Where to dump results.
         os.makedirs(cfg.result_dir, exist_ok=True)
@@ -614,7 +619,7 @@ class Runner:
                 near_plane=cfg.near_plane,
                 far_plane=cfg.far_plane,
                 image_ids=image_ids,
-                render_mode="RGB+ED",  # if cfg.depth_loss else "RGB",
+                render_mode=self.render_mode,
                 masks=masks,
             )
             if renders.shape[-1] == 4:
@@ -636,8 +641,15 @@ class Runner:
                 colors = colors + bkgd * (1.0 - alphas)
 
             if cfg.bkgd_opt:
-                bkgd = self.bkgd_module(image_ids, depths)
-                colors = colors + bkgd * (1.0 - alphas)
+                bkgd = self.bkgd_module(
+                    depths,
+                    camtoworlds,
+                    Ks,
+                    near_plane=cfg.near_plane,
+                    far_plane=cfg.far_plane,
+                )
+                # bkgd_mask = self.bkgd_module.predict_mask(colors, alphas, depths)
+                colors = colors + bkgd * (1 - alphas)
 
             self.cfg.strategy.step_pre_backward(
                 params=self.splats,
@@ -675,6 +687,8 @@ class Runner:
             if cfg.use_bilateral_grid:
                 tvloss = 10 * total_variation_loss(self.bil_grids.grids)
                 loss += tvloss
+            # if cfg.bkgd_opt:
+            #     loss += 0.001 * self.bkgd_module.mask_loss(bkgd_mask)
 
             # regularizations
             if cfg.opacity_reg > 0.0:
@@ -831,7 +845,8 @@ class Runner:
 
             # eval the full set
             if step in [i - 1 for i in cfg.eval_steps]:
-                self.eval(step)
+                self.eval(step, stage="train")
+                self.eval(step, stage="val")
                 self.render_traj(step)
 
             # run compression
@@ -858,12 +873,13 @@ class Runner:
         world_rank = self.world_rank
         world_size = self.world_size
 
-        valloader = torch.utils.data.DataLoader(
-            self.valset, batch_size=1, shuffle=False, num_workers=1
+        dataset = self.valset if stage == "val" else self.trainset
+        dataloader = torch.utils.data.DataLoader(
+            dataset, batch_size=1, shuffle=False, num_workers=1
         )
         ellipse_time = 0
         metrics = defaultdict(list)
-        for i, data in enumerate(valloader):
+        for i, data in enumerate(dataloader):
             camtoworlds = data["camtoworld"].to(device)
             Ks = data["K"].to(device)
             pixels = data["image"].to(device) / 255.0
@@ -872,7 +888,7 @@ class Runner:
 
             torch.cuda.synchronize()
             tic = time.time()
-            colors, _, _ = self.rasterize_splats(
+            renders, alphas, info = self.rasterize_splats(
                 camtoworlds=camtoworlds,
                 Ks=Ks,
                 width=width,
@@ -880,13 +896,34 @@ class Runner:
                 sh_degree=cfg.sh_degree,
                 near_plane=cfg.near_plane,
                 far_plane=cfg.far_plane,
+                render_mode=self.render_mode,
                 masks=masks,
-            )  # [1, H, W, 3]
+            )  # [1, H, W, 4]
             torch.cuda.synchronize()
             ellipse_time += time.time() - tic
 
+            if renders.shape[-1] == 4:
+                colors, depths = renders[..., 0:3], renders[..., 3:4]
+            else:
+                colors, depths = renders, None
+
             colors = torch.clamp(colors, 0.0, 1.0)
             canvas_list = [pixels, colors]
+
+            if cfg.bkgd_opt:
+                bkgd = self.bkgd_module(
+                    depths,
+                    camtoworlds,
+                    Ks,
+                    near_plane=cfg.near_plane,
+                    far_plane=cfg.far_plane,
+                )
+                # bkgd_mask = self.bkgd_module.predict_mask(colors, alphas, depths)
+                colors = colors + bkgd * (1 - alphas)
+                colors = torch.clamp(colors, 0.0, 1.0)
+                canvas_list.append(alphas.repeat(1, 1, 1, 3))
+                canvas_list.append(bkgd)
+                canvas_list.append(colors)
 
             if world_rank == 0:
                 # write images
@@ -908,7 +945,7 @@ class Runner:
                     metrics["cc_psnr"].append(self.psnr(cc_colors_p, pixels_p))
 
         if world_rank == 0:
-            ellipse_time /= len(valloader)
+            ellipse_time /= len(dataloader)
 
             stats = {k: torch.stack(v).mean().item() for k, v in metrics.items()}
             stats.update(
@@ -988,7 +1025,7 @@ class Runner:
                 sh_degree=cfg.sh_degree,
                 near_plane=cfg.near_plane,
                 far_plane=cfg.far_plane,
-                render_mode="RGB+ED",
+                render_mode=self.render_mode,
             )  # [1, H, W, 4]
             colors = torch.clamp(renders[..., 0:3], 0.0, 1.0)  # [1, H, W, 3]
             depths = renders[..., 3:4]  # [1, H, W, 1]
@@ -1029,16 +1066,32 @@ class Runner:
         K = camera_state.get_K(img_wh)
         c2w = torch.from_numpy(c2w).float().to(self.device)
         K = torch.from_numpy(K).float().to(self.device)
+        camtoworlds = c2w[None]
+        Ks = K[None]
 
-        render_colors, _, _ = self.rasterize_splats(
-            camtoworlds=c2w[None],
-            Ks=K[None],
+        renders, alphas, info = self.rasterize_splats(
+            camtoworlds=camtoworlds,
+            Ks=Ks,
             width=W,
             height=H,
             sh_degree=self.cfg.sh_degree,  # active all SH degrees
             radius_clip=3.0,  # skip GSs that have small image radius (in pixels)
+            render_mode=self.render_mode,
         )  # [1, H, W, 3]
-        return render_colors[0].cpu().numpy()
+        if renders.shape[-1] == 4:
+            colors, depths = renders[..., 0:3], renders[..., 3:4]
+        else:
+            colors, depths = renders, None
+        if cfg.bkgd_opt:
+            bkgd = self.bkgd_module(
+                depths,
+                camtoworlds,
+                Ks,
+                near_plane=cfg.near_plane,
+                far_plane=cfg.far_plane,
+            )
+            colors = colors + bkgd * (1.0 - alphas)
+        return colors[0].cpu().numpy()
 
 
 def main(local_rank: int, world_rank, world_size: int, cfg: Config):
