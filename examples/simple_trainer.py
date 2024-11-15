@@ -1019,11 +1019,14 @@ class Runner:
         os.makedirs(compress_dir, exist_ok=True)
 
         self.compression_method.compress(compress_dir, self.splats)
+        torch.save(self.mlp_module.half().state_dict(), os.path.join(compress_dir, "mlp_module.pt"))
 
         # evaluate compression
         splats_c = self.compression_method.decompress(compress_dir)
         for k in splats_c.keys():
             self.splats[k].data = splats_c[k].to(self.device)
+        state_dict = torch.load(os.path.join(compress_dir, "mlp_module.pt"), map_location=self.device, weights_only=True)
+        self.mlp_module.load_state_dict(state_dict)
         self.eval(step=step, stage="compress")
 
     @torch.no_grad()
@@ -1064,6 +1067,7 @@ def main(local_rank: int, world_rank, world_size: int, cfg: Config):
         ]
         for k in runner.splats.keys():
             runner.splats[k].data = torch.cat([ckpt["splats"][k] for ckpt in ckpts])
+        runner.mlp_module.load_state_dict(ckpts[0]["mlp_module"])
         step = ckpts[0]["step"]
         runner.eval(step=step)
         runner.render_traj(step=step)
