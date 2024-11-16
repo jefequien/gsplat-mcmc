@@ -5,6 +5,10 @@ SCENE_LIST="garden bicycle stump bonsai counter kitchen room treehill flowers"
 RESULT_DIR="results/benchmark_mcmc_1M_mlp_png_compression"
 CAP_MAX=1000000
 
+# # 2M GSs
+# RESULT_DIR="results/benchmark_mcmc_2M_mlp_png_compression"
+# CAP_MAX=2000000
+
 for SCENE in $SCENE_LIST;
 do
     if [ "$SCENE" = "bonsai" ] || [ "$SCENE" = "counter" ] || [ "$SCENE" = "kitchen" ] || [ "$SCENE" = "room" ]; then
