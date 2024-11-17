@@ -1025,13 +1025,15 @@ class Runner:
         os.makedirs(compress_dir, exist_ok=True)
 
         self.compression_method.compress(compress_dir, self.splats)
-        self.mlp_module.compress(compress_dir)
+        if self.cfg.mlp_opt:
+            self.mlp_module.compress(compress_dir)
 
         # evaluate compression
         splats_c = self.compression_method.decompress(compress_dir)
         for k in splats_c.keys():
             self.splats[k].data = splats_c[k].to(self.device)
-        self.mlp_module.decompress(compress_dir)
+        if self.cfg.mlp_opt:
+            self.mlp_module.decompress(compress_dir)
         self.eval(step=step, stage="compress")
 
     @torch.no_grad()
