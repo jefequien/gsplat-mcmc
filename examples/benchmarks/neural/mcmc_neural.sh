@@ -1,5 +1,6 @@
 SCENE_DIR="data/360_v2"
 SCENE_LIST="garden bicycle stump bonsai counter kitchen room treehill flowers"
+SCENE_LIST="garden"
 RENDER_TRAJ_PATH="ellipse"
 
 # 1M GSs
@@ -23,6 +24,7 @@ do
     # train and eval
     CUDA_VISIBLE_DEVICES=0 python simple_trainer.py mcmc --disable_viewer --data_factor $DATA_FACTOR \
         --strategy.cap-max $CAP_MAX \
+        --neural_opt \
         --render_traj_path $RENDER_TRAJ_PATH \
         --data_dir $SCENE_DIR/$SCENE/ \
         --result_dir $RESULT_DIR/$SCENE/

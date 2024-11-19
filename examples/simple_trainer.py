@@ -36,6 +36,7 @@ from lib_bilagrid import (
     total_variation_loss,
 )
 from mlp import create_mlp
+from neural_opt import NeuralOptModule
 
 from gsplat.compression import PngCompression
 from gsplat.distributed import cli
@@ -148,6 +149,11 @@ class Config:
     # Regularization for appearance optimization as weight decay
     app_opt_reg: float = 1e-6
 
+    # Enable neural optimization. (experimental)
+    neural_opt: bool = False
+    # Learning rate for neural optimization
+    neural_opt_lr: float = 1e-3
+
     # Enable bilateral grid. (experimental)
     use_bilateral_grid: bool = False
     # Shape of the bilateral grid (X, Y, W)
@@ -249,7 +255,7 @@ def create_splats_with_optimizers(
     #     params.append(("colors", torch.nn.Parameter(colors), 2.5e-3))
 
     splats = torch.nn.ParameterDict({n: v for n, v, _ in params}).to(device)
-    
+
     # Scale learning rate based on batch size, reference:
     # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
     # Note that this would not make the training exactly equivalent, see
@@ -320,7 +326,7 @@ class Runner:
         print("Scene scale:", self.scene_scale)
 
         # Model
-        feature_dim = 32 # if cfg.app_opt else None
+        feature_dim = 32  # if cfg.app_opt else None
         self.params, self.optimizers = create_splats_with_optimizers(
             self.parser,
             init_type=cfg.init_type,
@@ -338,11 +344,6 @@ class Runner:
             world_rank=world_rank,
             world_size=world_size,
         )
-        self.quats_mlp = create_mlp(in_dim=feature_dim, num_layers=3, layer_width=64, out_dim=4).to(self.device)
-        self.scales_mlp = create_mlp(in_dim=feature_dim, num_layers=3, layer_width=64, out_dim=3).to(self.device)
-        # self.opacities_mlp = create_mlp(in_dim=feature_dim, num_layers=3, layer_width=64, out_dim=1).to(self.device)
-        self.sh0_mlp = create_mlp(in_dim=feature_dim, num_layers=3, layer_width=64, out_dim=3).to(self.device)
-        self.shN_mlp = create_mlp(in_dim=feature_dim, num_layers=3, layer_width=64, out_dim=45, initialize_last_layer_zeros=True).to(self.device)
         print("Model initialized. Number of GS:", len(self.params["means"]))
 
         # Densification Strategy
@@ -405,6 +406,18 @@ class Runner:
             if world_size > 1:
                 self.app_module = DDP(self.app_module)
 
+        self.neural_optimizers = []
+        if cfg.neural_opt:
+            self.neural_module = NeuralOptModule(feature_dim, cfg.sh_degree).to(
+                self.device
+            )
+            self.neural_optimizers = [
+                torch.optim.Adam(
+                    self.neural_module.parameters(),
+                    lr=cfg.neural_opt_lr * math.sqrt(cfg.batch_size),
+                )
+            ]
+
         self.bil_grid_optimizers = []
         if cfg.use_bilateral_grid:
             self.bil_grids = BilateralGrid(
@@ -420,29 +433,6 @@ class Runner:
                     eps=1e-15,
                 ),
             ]
-        
-        self.mlp_optimizers = [
-            torch.optim.Adam(
-                self.quats_mlp.parameters(),
-                lr=1e-3 * math.sqrt(cfg.batch_size),
-            ),
-            torch.optim.Adam(
-                self.scales_mlp.parameters(),
-                lr=5e-3 * math.sqrt(cfg.batch_size),
-            ),
-            # torch.optim.Adam(
-            #     self.opacities_mlp.parameters(),
-            #     lr=5e-2 * math.sqrt(cfg.batch_size),
-            # ),
-            torch.optim.Adam(
-                self.sh0_mlp.parameters(),
-                lr=2.5e-3 * math.sqrt(cfg.batch_size),
-            ),
-            torch.optim.Adam(
-                self.shN_mlp.parameters(),
-                lr=(2.5e-3 / 20) * math.sqrt(cfg.batch_size),
-            ),
-        ]
 
         # Losses & Metrics.
         self.ssim = StructuralSimilarityIndexMeasure(data_range=1.0).to(self.device)
@@ -484,10 +474,7 @@ class Runner:
         # quats = self.params["quats"]  # [N, 4]
         # scales = torch.exp(self.params["scales"])  # [N, 3]
         opacities = torch.sigmoid(self.params["opacities"])  # [N,]
-        
-        quats = self.quats_mlp(self.params["features"]).float()
-        scales = torch.exp(self.scales_mlp(self.params["features"]).float() - 5.)
-        # opacities = torch.sigmoid(self.opacities_mlp(self.params["features"]).float().reshape(-1))
+        features = self.params["features"]
 
         image_ids = kwargs.pop("image_ids", None)
         if self.cfg.app_opt:
@@ -499,19 +486,13 @@ class Runner:
             )
             colors = colors + self.params["colors"]
             colors = torch.sigmoid(colors)
-        else:
-            # N = len(self.params["features"])
-            # dirs = F.normalize(means[None, :, :] - camtoworlds[:, None, :3, 3], dim=-1)[0]
-            # sh0_input = torch.cat([dirs, self.params["features"]], dim=1)
-            # colors = self.sh0_mlp(sh0_input).float().reshape((N, 1, 3))
-            # colors = torch.sigmoid(colors)
-            
-            N = len(self.params["features"])
-            sh0 = self.sh0_mlp(self.params["features"]).float().reshape((N, 1, 3))
-            shN = self.shN_mlp(self.params["features"]).float().reshape((N, 15, 3))
+        elif self.cfg.neural_opt:
+            quats, scales, sh0, shN = self.neural_module(means, opacities, features)
+            scales = torch.exp(scales)
             colors = torch.cat([sh0, shN], 1)  # [N, K, 3]
-            # colors = torch.cat([self.params["sh0"], self.params["shN"]], 1)  # [N, K, 3]
-        
+        else:
+            colors = torch.cat([self.params["sh0"], self.params["shN"]], 1)  # [N, K, 3]
+
         splats = {
             "means": means,
             "quats": quats,
@@ -710,16 +691,9 @@ class Runner:
 
             # regularizations
             if cfg.opacity_reg > 0.0:
-                loss = (
-                    loss
-                    + cfg.opacity_reg
-                    * torch.abs(splats["opacities"]).mean()
-                )
+                loss = loss + cfg.opacity_reg * torch.abs(splats["opacities"]).mean()
             if cfg.scale_reg > 0.0:
-                loss = (
-                    loss
-                    + cfg.scale_reg * torch.abs(splats["scales"]).mean()
-                )
+                loss = loss + cfg.scale_reg * torch.abs(splats["scales"]).mean()
 
             loss.backward()
 
@@ -783,6 +757,11 @@ class Runner:
                         data["app_module"] = self.app_module.module.state_dict()
                     else:
                         data["app_module"] = self.app_module.state_dict()
+                if cfg.neural_opt:
+                    if world_size > 1:
+                        data["neural_module"] = self.neural_module.module.state_dict()
+                    else:
+                        data["neural_module"] = self.neural_module.state_dict()
                 torch.save(
                     data, f"{self.ckpt_dir}/ckpt_{step}_rank{self.world_rank}.pt"
                 )
@@ -825,10 +804,10 @@ class Runner:
             for optimizer in self.app_optimizers:
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)
-            for optimizer in self.bil_grid_optimizers:
+            for optimizer in self.neural_optimizers:
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)
-            for optimizer in self.mlp_optimizers:
+            for optimizer in self.bil_grid_optimizers:
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)
             for scheduler in schedulers:
