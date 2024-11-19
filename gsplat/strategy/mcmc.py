@@ -142,7 +142,11 @@ class MCMCStrategy(Strategy):
 
         # add noise to GSs
         inject_noise_to_position(
-            params=params, optimizers=optimizers, splats=splats, state={}, scaler=lr * self.noise_lr
+            params=params,
+            optimizers=optimizers,
+            splats=splats,
+            state={},
+            scaler=lr * self.noise_lr,
         )
 
     @torch.no_grad()
