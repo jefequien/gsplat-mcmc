@@ -1,7 +1,6 @@
 SCENE_DIR="data/360_v2"
 # eval all 9 scenes for benchmarking
 SCENE_LIST="garden bicycle stump bonsai counter kitchen room treehill flowers"
-SCENE_LIST="garden"
 
 # 1M GSs
 RESULT_DIR="results/benchmark_mcmc_1M_neural_png_compression"
