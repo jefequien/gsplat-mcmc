@@ -50,6 +50,7 @@ class PngCompression:
             "scales": _compress_png,
             "quats": _compress_png,
             "opacities": _compress_png,
+            "features": _compress_png,
             "sh0": _compress_png,
             "shN": _compress_kmeans,
         }
@@ -64,6 +65,7 @@ class PngCompression:
             "scales": _decompress_png,
             "quats": _decompress_png,
             "opacities": _decompress_png,
+            "features": _decompress_png,
             "sh0": _decompress_png,
             "shN": _decompress_kmeans,
         }
@@ -82,7 +84,8 @@ class PngCompression:
 
         # Param-specific preprocessing
         splats["means"] = log_transform(splats["means"])
-        splats["quats"] = F.normalize(splats["quats"], dim=-1)
+        if "quats" in splats:
+            splats["quats"] = F.normalize(splats["quats"], dim=-1)
 
         n_gs = len(splats["means"])
         n_sidelen = int(n_gs**0.5)

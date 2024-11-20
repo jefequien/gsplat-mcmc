@@ -1,22 +1,11 @@
 SCENE_DIR="data/360_v2"
 # eval all 9 scenes for benchmarking
 SCENE_LIST="garden bicycle stump bonsai counter kitchen room treehill flowers"
-
-# # 0.36M GSs
-# RESULT_DIR="results/benchmark_mcmc_0_36M_png_compression"
-# CAP_MAX=360000
-
-# # 0.49M GSs
-# RESULT_DIR="results/benchmark_mcmc_0_49M_png_compression"
-# CAP_MAX=490000
+SCENE_LIST="garden"
 
 # 1M GSs
-RESULT_DIR="results/benchmark_mcmc_1M_png_compression"
+RESULT_DIR="results/benchmark_mcmc_1M_neural_png_compression"
 CAP_MAX=1000000
-
-# # 4M GSs
-# RESULT_DIR="results/benchmark_mcmc_4M_png_compression"
-# CAP_MAX=4000000
 
 
 for SCENE in $SCENE_LIST;
@@ -30,14 +19,16 @@ do
     echo "Running $SCENE"
 
     # train without eval
-    CUDA_VISIBLE_DEVICES=0 python simple_trainer.py mcmc --eval_steps -1 --disable_viewer --data_factor $DATA_FACTOR \
+    CUDA_VISIBLE_DEVICES=0 python simple_trainer.py mcmc --disable_viewer --data_factor $DATA_FACTOR \
         --strategy.cap-max $CAP_MAX \
+        --neural_opt \
         --data_dir $SCENE_DIR/$SCENE/ \
         --result_dir $RESULT_DIR/$SCENE/
 
     # eval: use vgg for lpips to align with other benchmarks
     CUDA_VISIBLE_DEVICES=0 python simple_trainer.py mcmc --disable_viewer --data_factor $DATA_FACTOR \
         --strategy.cap-max $CAP_MAX \
+        --neural_opt \
         --data_dir $SCENE_DIR/$SCENE/ \
         --result_dir $RESULT_DIR/$SCENE/ \
         --lpips_net vgg \

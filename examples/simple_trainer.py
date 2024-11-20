@@ -144,6 +144,8 @@ class Config:
     app_opt: bool = False
     # Appearance embedding dimension
     app_embed_dim: int = 16
+    # Appearance feature dimension
+    app_feature_dim: int = 32
     # Learning rate for appearance optimization
     app_opt_lr: float = 1e-3
     # Regularization for appearance optimization as weight decay
@@ -153,6 +155,8 @@ class Config:
     neural_opt: bool = False
     # Learning rate for neural optimization
     neural_opt_lr: float = 1e-3
+    # Neural feature dimension
+    neural_feature_dim: int = 4
 
     # Enable bilateral grid. (experimental)
     use_bilateral_grid: bool = False
@@ -192,6 +196,7 @@ class Config:
 
 
 def create_splats_with_optimizers(
+    cfg: Config,
     parser: Parser,
     init_type: str = "sfm",
     init_num_pts: int = 100_000,
@@ -203,7 +208,6 @@ def create_splats_with_optimizers(
     sparse_grad: bool = False,
     visible_adam: bool = False,
     batch_size: int = 1,
-    feature_dim: Optional[int] = None,
     device: str = "cuda",
     world_rank: int = 0,
     world_size: int = 1,
@@ -230,7 +234,7 @@ def create_splats_with_optimizers(
     N = points.shape[0]
     quats = torch.rand((N, 4))  # [N, 4]
     opacities = torch.logit(torch.full((N,), init_opacity))  # [N,]
-    features = torch.rand(N, feature_dim)
+    features = torch.rand(N, cfg.neural_feature_dim)
 
     params = [
         # name, value, lr
@@ -240,6 +244,9 @@ def create_splats_with_optimizers(
         # ("scales", torch.nn.Parameter(scales), 5e-3),
         # ("quats", torch.nn.Parameter(quats), 1e-3),
     ]
+    colors = torch.zeros((N, (sh_degree + 1) ** 2, 3))  # [N, K, 3]
+    colors[:, 0, :] = rgb_to_sh(rgbs)
+    params.append(("sh0", torch.nn.Parameter(colors[:, :1, :]), 2.5e-3))
 
     # if feature_dim is None:
     #     # color is SH coefficients.
@@ -326,8 +333,8 @@ class Runner:
         print("Scene scale:", self.scene_scale)
 
         # Model
-        feature_dim = 32  # if cfg.app_opt else None
         self.params, self.optimizers = create_splats_with_optimizers(
+            cfg,
             self.parser,
             init_type=cfg.init_type,
             init_num_pts=cfg.init_num_pts,
@@ -339,7 +346,6 @@ class Runner:
             sparse_grad=cfg.sparse_grad,
             visible_adam=cfg.visible_adam,
             batch_size=cfg.batch_size,
-            feature_dim=feature_dim,
             device=self.device,
             world_rank=world_rank,
             world_size=world_size,
@@ -388,9 +394,11 @@ class Runner:
 
         self.app_optimizers = []
         if cfg.app_opt:
-            assert feature_dim is not None
             self.app_module = AppearanceOptModule(
-                len(self.trainset), feature_dim, cfg.app_embed_dim, cfg.sh_degree
+                len(self.trainset),
+                cfg.app_feature_dim,
+                cfg.app_embed_dim,
+                cfg.sh_degree,
             ).to(self.device)
             self.app_optimizers = [
                 torch.optim.Adam(
@@ -408,9 +416,9 @@ class Runner:
 
         self.neural_optimizers = []
         if cfg.neural_opt:
-            self.neural_module = NeuralOptModule(feature_dim, cfg.sh_degree).to(
-                self.device
-            )
+            self.neural_module = NeuralOptModule(
+                cfg.neural_feature_dim, cfg.sh_degree
+            ).to(self.device)
             self.neural_optimizers = [
                 torch.optim.Adam(
                     self.neural_module.parameters(),
@@ -487,7 +495,8 @@ class Runner:
             colors = colors + self.params["colors"]
             colors = torch.sigmoid(colors)
         elif self.cfg.neural_opt:
-            quats, scales, sh0, shN = self.neural_module(means, opacities, features)
+            sh0 = self.params["sh0"]
+            quats, scales, shN = self.neural_module(means, opacities, sh0, features)
             scales = torch.exp(scales)
             colors = torch.cat([sh0, shN], 1)  # [N, K, 3]
         else:
@@ -1019,9 +1028,13 @@ class Runner:
         os.makedirs(compress_dir, exist_ok=True)
 
         self.compression_method.compress(compress_dir, self.params)
+        if self.cfg.neural_opt:
+            self.neural_module.compress(compress_dir)
 
         # evaluate compression
         splats_c = self.compression_method.decompress(compress_dir)
+        if self.cfg.neural_opt:
+            self.neural_module.decompress(compress_dir)
         for k in splats_c.keys():
             self.params[k].data = splats_c[k].to(self.device)
         self.eval(step=step, stage="compress")
@@ -1062,8 +1075,15 @@ def main(local_rank: int, world_rank, world_size: int, cfg: Config):
             torch.load(file, map_location=runner.device, weights_only=True)
             for file in cfg.ckpt
         ]
-        for k in runner.splats.keys():
-            runner.splats[k].data = torch.cat([ckpt["splats"][k] for ckpt in ckpts])
+        for k in runner.params.keys():
+            runner.params[k].data = torch.cat([ckpt["splats"][k] for ckpt in ckpts])
+        if cfg.pose_opt:
+            runner.pose_adjust.load_state_dict(ckpts[0]["pose_adjust"])
+        if cfg.app_opt:
+            runner.app_module.load_state_dict(ckpts[0]["app_module"])
+        if cfg.neural_opt:
+            runner.neural_module.load_state_dict(ckpts[0]["neural_module"])
+
         step = ckpts[0]["step"]
         runner.eval(step=step)
         runner.render_traj(step=step)
