@@ -219,6 +219,9 @@ def create_splats_with_optimizers(
     scales_lr: float = 5e-3,
     opacities_lr: float = 5e-2,
     quats_lr: float = 1e-3,
+    times_lr: float = 5e-3,
+    durations_lr: float = 5e-3,
+    velocities_lr: float = 1e-4,
     sh0_lr: float = 2.5e-3,
     shN_lr: float = 2.5e-3 / 20,
     scene_scale: float = 1.0,
@@ -253,6 +256,9 @@ def create_splats_with_optimizers(
     N = points.shape[0]
     quats = torch.rand((N, 4))  # [N, 4]
     opacities = torch.logit(torch.full((N,), init_opacity))  # [N,]
+    times = torch.rand((N,)) * 2.0 - 1.0
+    durations = torch.logit(torch.full((N,), 0.01))
+    velocities = torch.zeros((N, 3))
 
     params = [
         # name, value, lr
@@ -260,6 +266,9 @@ def create_splats_with_optimizers(
         ("scales", torch.nn.Parameter(scales), scales_lr),
         ("quats", torch.nn.Parameter(quats), quats_lr),
         ("opacities", torch.nn.Parameter(opacities), opacities_lr),
+        ("times", torch.nn.Parameter(times), times_lr),
+        ("durations", torch.nn.Parameter(durations), durations_lr),
+        ("velocities", torch.nn.Parameter(velocities), velocities_lr),
     ]
 
     if feature_dim is None:
@@ -486,16 +495,22 @@ class Runner:
         width: int,
         height: int,
         masks: Optional[Tensor] = None,
+        image_times: Optional[Tensor] = None,
         rasterize_mode: Optional[Literal["classic", "antialiased"]] = None,
         camera_model: Optional[Literal["pinhole", "ortho", "fisheye"]] = None,
         **kwargs,
     ) -> Tuple[Tensor, Tensor, Dict]:
-        means = self.splats["means"]  # [N, 3]
+        # means = self.splats["means"]  # [N, 3]
         # quats = F.normalize(self.splats["quats"], dim=-1)  # [N, 4]
         # rasterization does normalization internally
         quats = self.splats["quats"]  # [N, 4]
         scales = torch.exp(self.splats["scales"])  # [N, 3]
-        opacities = torch.sigmoid(self.splats["opacities"])  # [N,]
+        # opacities = torch.sigmoid(self.splats["opacities"])  # [N,]
+
+        times = torch.sigmoid(self.splats["times"])
+        durations = 10.0 * torch.sigmoid(self.splats["durations"])
+        means = self.splats["means"] + self.splats["velocities"] * (image_times - times)[:, None]
+        opacities = torch.sigmoid(self.splats["opacities"]) * torch.exp(-0.5 * ((image_times - times) / durations) ** 2)
 
         image_ids = kwargs.pop("image_ids", None)
         if self.cfg.app_opt:
@@ -620,6 +635,7 @@ class Runner:
             )
             image_ids = data["image_id"].to(device)
             masks = data["mask"].to(device) if "mask" in data else None  # [1, H, W]
+            image_times = data["image_time"].to(device)
             if cfg.depth_loss:
                 points = data["points"].to(device)  # [1, M, 2]
                 depths_gt = data["depths"].to(device)  # [1, M]
@@ -647,6 +663,7 @@ class Runner:
                 image_ids=image_ids,
                 render_mode="RGB+ED" if cfg.depth_loss else "RGB",
                 masks=masks,
+                image_times=image_times,
             )
             if renders.shape[-1] == 4:
                 colors, depths = renders[..., 0:3], renders[..., 3:4]
@@ -889,7 +906,8 @@ class Runner:
 
             # eval the full set
             if step in [i - 1 for i in cfg.eval_steps]:
-                self.eval(step)
+                self.eval(step, stage="train")
+                self.eval(step, stage="val")
                 self.render_traj(step)
 
             # run compression
@@ -918,16 +936,22 @@ class Runner:
         world_rank = self.world_rank
         world_size = self.world_size
 
-        valloader = torch.utils.data.DataLoader(
-            self.valset, batch_size=1, shuffle=False, num_workers=1
-        )
+        if stage == "train":
+            dataloader = torch.utils.data.DataLoader(
+                self.trainset, batch_size=1, shuffle=False, num_workers=1
+            )
+        else:
+            dataloader = torch.utils.data.DataLoader(
+                self.valset, batch_size=1, shuffle=False, num_workers=1
+            )
         ellipse_time = 0
         metrics = defaultdict(list)
-        for i, data in enumerate(valloader):
+        for i, data in enumerate(dataloader):
             camtoworlds = data["camtoworld"].to(device)
             Ks = data["K"].to(device)
             pixels = data["image"].to(device) / 255.0
             masks = data["mask"].to(device) if "mask" in data else None
+            image_times = data["image_time"].to(device)
             height, width = pixels.shape[1:3]
 
             torch.cuda.synchronize()
@@ -941,6 +965,7 @@ class Runner:
                 near_plane=cfg.near_plane,
                 far_plane=cfg.far_plane,
                 masks=masks,
+                image_times=image_times,
             )  # [1, H, W, 3]
             torch.cuda.synchronize()
             ellipse_time += max(time.time() - tic, 1e-10)
@@ -970,7 +995,7 @@ class Runner:
                     metrics["cc_lpips"].append(self.lpips(cc_colors_p, pixels_p))
 
         if world_rank == 0:
-            ellipse_time /= len(valloader)
+            ellipse_time /= len(dataloader)
 
             stats = {k: torch.stack(v).mean().item() for k, v in metrics.items()}
             stats.update(
@@ -1061,6 +1086,7 @@ class Runner:
                 near_plane=cfg.near_plane,
                 far_plane=cfg.far_plane,
                 render_mode="RGB+ED",
+                image_times=torch.tensor([0.0]).float().to(device),
             )  # [1, H, W, 4]
             colors = torch.clamp(renders[..., 0:3], 0.0, 1.0)  # [1, H, W, 3]
             depths = renders[..., 3:4]  # [1, H, W, 1]

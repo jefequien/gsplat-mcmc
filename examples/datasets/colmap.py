@@ -404,6 +404,7 @@ class Dataset:
             "camtoworld": torch.from_numpy(camtoworlds).float(),
             "image": torch.from_numpy(image).float(),
             "image_id": item,  # the index of the image in the dataset
+            "image_time": torch.tensor(index / len(self.parser.image_paths)).float(),
         }
         if mask is not None:
             data["mask"] = torch.from_numpy(mask).bool()
