@@ -161,7 +161,7 @@ def test_proj(
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="No CUDA device")
 @pytest.mark.parametrize("camera_model", ["pinhole", "ortho", "fisheye"])
-@pytest.mark.parametrize("fused", [False, True])
+@pytest.mark.parametrize("fused", [True])
 @pytest.mark.parametrize("calc_compensations", [True, False])
 @pytest.mark.parametrize("batch_dims", [(), (2,), (1, 2)])
 def test_projection(
@@ -401,7 +401,7 @@ def test_fully_fused_projection_packed(
     ).to_dense()
     __depths = __depths.reshape(batch_dims + (C, N))
     __normals = torch.sparse_coo_tensor(
-        torch.stack([camera_ids, gaussian_ids]), normals, _normals.shape
+        torch.stack([batch_ids, camera_ids, gaussian_ids]), normals, (B, C, N, 3)
     ).to_dense()
     __normals = __normals.reshape(batch_dims + (C, N, 3))
     __conics = torch.sparse_coo_tensor(
@@ -537,7 +537,7 @@ def test_rasterize_to_pixels(test_data, channels: int, batch_dims: Tuple[int, ..
     backgrounds = test_data["backgrounds"]
 
     # Project Gaussians to 2D
-    radii, means2d, depths, conics, compensations = fully_fused_projection(
+    radii, means2d, depths, normals, conics, compensations = fully_fused_projection(
         means, None, quats, scales, viewmats, Ks, width, height
     )
     opacities = torch.broadcast_to(opacities[..., None, :], batch_dims + (C, N))

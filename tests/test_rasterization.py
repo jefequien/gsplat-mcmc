@@ -80,6 +80,8 @@ def test_rasterization(
         assert renders.shape == batch_dims + (C, height, width, 3)
     elif render_mode == "RGB+D":
         assert renders.shape == batch_dims + (C, height, width, 4)
+    elif render_mode == "RGB+ED+N":
+        assert renders.shape == batch_dims + (C, height, width, 7)
 
     _renders, _alphas, _meta = _rasterization(
         means=means,
