@@ -571,6 +571,8 @@ def rasterize_to_pixels(
         3,
         4,
         5,
+        6,
+        7,
         8,
         9,
         16,
@@ -732,6 +734,8 @@ def rasterize_to_pixels_eval3d(
         3,
         4,
         5,
+        6,
+        7,
         8,
         9,
         16,
@@ -1008,7 +1012,7 @@ class _FullyFusedProjection(torch.autograd.Function):
         )
 
         # "covars" and {"quats", "scales"} are mutually exclusive
-        radii, means2d, depths, conics, compensations = _make_lazy_cuda_func(
+        radii, means2d, depths, normals, conics, compensations = _make_lazy_cuda_func(
             "projection_ewa_3dgs_fused_fwd"
         )(
             means,
@@ -1037,10 +1041,10 @@ class _FullyFusedProjection(torch.autograd.Function):
         ctx.eps2d = eps2d
         ctx.camera_model_type = camera_model_type
 
-        return radii, means2d, depths, conics, compensations
+        return radii, means2d, depths, normals, conics, compensations
 
     @staticmethod
-    def backward(ctx, v_radii, v_means2d, v_depths, v_conics, v_compensations):
+    def backward(ctx, v_radii, v_means2d, v_depths, v_normals, v_conics, v_compensations):
         (
             means,
             covars,
@@ -1076,6 +1080,7 @@ class _FullyFusedProjection(torch.autograd.Function):
             compensations,
             v_means2d.contiguous(),
             v_depths.contiguous(),
+            v_normals.contiguous(),
             v_conics.contiguous(),
             v_compensations,
             ctx.needs_input_grad[4],  # viewmats_requires_grad
@@ -1546,6 +1551,7 @@ class _FullyFusedProjectionPacked(torch.autograd.Function):
             radii,
             means2d,
             depths,
+            normals,
             conics,
             compensations,
         ) = _make_lazy_cuda_func("projection_ewa_3dgs_packed_fwd")(
@@ -1593,6 +1599,7 @@ class _FullyFusedProjectionPacked(torch.autograd.Function):
             radii,
             means2d,
             depths,
+            normals,
             conics,
             compensations,
         )
@@ -1606,6 +1613,7 @@ class _FullyFusedProjectionPacked(torch.autograd.Function):
         v_radii,
         v_means2d,
         v_depths,
+        v_normals,
         v_conics,
         v_compensations,
     ):
@@ -1650,6 +1658,7 @@ class _FullyFusedProjectionPacked(torch.autograd.Function):
             compensations,
             v_means2d.contiguous(),
             v_depths.contiguous(),
+            v_normals.contiguous(),
             v_conics.contiguous(),
             v_compensations,
             ctx.needs_input_grad[4],  # viewmats_requires_grad

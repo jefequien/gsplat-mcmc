@@ -17,7 +17,7 @@ device = torch.device("cuda:0")
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="No CUDA device")
 @pytest.mark.parametrize("per_view_color", [True, False])
 @pytest.mark.parametrize("sh_degree", [None, 3])
-@pytest.mark.parametrize("render_mode", ["RGB", "RGB+D", "D"])
+@pytest.mark.parametrize("render_mode", ["RGB", "RGB+D", "D", "RGB+ED+N"])
 @pytest.mark.parametrize("packed", [True, False])
 @pytest.mark.parametrize("batch_dims", [(), (2,), (1, 2)])
 def test_rasterization(
@@ -80,6 +80,8 @@ def test_rasterization(
         assert renders.shape == batch_dims + (C, height, width, 3)
     elif render_mode == "RGB+D":
         assert renders.shape == batch_dims + (C, height, width, 4)
+    elif render_mode == "RGB+ED+N":
+        assert renders.shape == batch_dims + (C, height, width, 7)
 
     _renders, _alphas, _meta = _rasterization(
         means=means,

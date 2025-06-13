@@ -43,6 +43,7 @@ __global__ void projection_ewa_3dgs_packed_fwd_kernel(
     int32_t *__restrict__ radii,         // [nnz, 2]
     scalar_t *__restrict__ means2d,      // [nnz, 2]
     scalar_t *__restrict__ depths,       // [nnz]
+    scalar_t *__restrict__ normals,      // [nnz, 3]
     scalar_t *__restrict__ conics,       // [nnz, 3]
     scalar_t *__restrict__ compensations // [nnz] optional
 ) {
@@ -90,6 +91,7 @@ __global__ void projection_ewa_3dgs_packed_fwd_kernel(
     mat2 covar2d;
     vec2 mean2d;
     mat2 covar2d_inv;
+    vec3 normal;
     float compensation;
     float det;
     if (valid) {
@@ -116,6 +118,8 @@ __global__ void projection_ewa_3dgs_packed_fwd_kernel(
             quat_scale_to_covar_preci(
                 glm::make_vec4(quats), glm::make_vec3(scales), &covar, nullptr
             );
+            mat3 rotmat = quat_to_rotmat(glm::make_vec4(quats));
+            normal = rotmat[2];
         }
         mat3 covar_c;
         covarW2C(R, covar, covar_c);
@@ -244,6 +248,9 @@ __global__ void projection_ewa_3dgs_packed_fwd_kernel(
             means2d[thread_data * 2] = mean2d.x;
             means2d[thread_data * 2 + 1] = mean2d.y;
             depths[thread_data] = mean_c.z;
+            normals[thread_data * 3] = normal.x;
+            normals[thread_data * 3 + 1] = normal.y;
+            normals[thread_data * 3 + 2] = normal.z;
             conics[thread_data * 3] = covar2d_inv[0][0];
             conics[thread_data * 3 + 1] = covar2d_inv[0][1];
             conics[thread_data * 3 + 2] = covar2d_inv[1][1];
@@ -290,6 +297,7 @@ void launch_projection_ewa_3dgs_packed_fwd_kernel(
     at::optional<at::Tensor> radii,        // [nnz, 2]
     at::optional<at::Tensor> means2d,      // [nnz, 2]
     at::optional<at::Tensor> depths,       // [nnz]
+    at::optional<at::Tensor> normals,      // [nnz, 3]
     at::optional<at::Tensor> conics,       // [nnz, 3]
     at::optional<at::Tensor> compensations // [nnz] optional
 ) {
@@ -364,6 +372,8 @@ void launch_projection_ewa_3dgs_packed_fwd_kernel(
                                         : nullptr,
                     depths.has_value() ? depths.value().data_ptr<scalar_t>()
                                        : nullptr,
+                    normals.has_value() ? normals.value().data_ptr<scalar_t>()
+                                       : nullptr,
                     conics.has_value() ? conics.value().data_ptr<scalar_t>()
                                        : nullptr,
                     compensations.has_value()
@@ -400,6 +410,7 @@ __global__ void projection_ewa_3dgs_packed_bwd_kernel(
     // grad outputs
     const scalar_t *__restrict__ v_means2d,       // [nnz, 2]
     const scalar_t *__restrict__ v_depths,        // [nnz]
+    const scalar_t *__restrict__ v_normals,       // [nnz, 3]
     const scalar_t *__restrict__ v_conics,        // [nnz, 3]
     const scalar_t *__restrict__ v_compensations, // [nnz] optional
     const bool sparse_grad, // whether the outputs are in COO format [nnz, ...]
@@ -577,6 +588,13 @@ __global__ void projection_ewa_3dgs_packed_bwd_kernel(
             quat_scale_to_covar_vjp(
                 quat, scale, rotmat, v_covar, v_quat, v_scale
             );
+            // add contribution from v_normals
+            v_normals += idx * 3;
+            quat_to_rotmat_vjp(
+                quat,
+                mat3(0.f, 0.f, 0.f, 0.f, 0.f, 0.f, v_normals[0], v_normals[1], v_normals[2]),
+                v_quat
+            );
             v_quats += idx * 4;
             v_scales += idx * 3;
             v_quats[0] = v_quat[0];
@@ -621,6 +639,13 @@ __global__ void projection_ewa_3dgs_packed_bwd_kernel(
             vec3 v_scale(0.f);
             quat_scale_to_covar_vjp(
                 quat, scale, rotmat, v_covar, v_quat, v_scale
+            );
+            // add contribution from v_normals
+            v_normals += idx * 3;
+            quat_to_rotmat_vjp(
+                quat,
+                mat3(0.f, 0.f, 0.f, 0.f, 0.f, 0.f, v_normals[0], v_normals[1], v_normals[2]),
+                v_quat
             );
             warpSum(v_quat, warp_group_g);
             warpSum(v_scale, warp_group_g);
@@ -677,6 +702,7 @@ void launch_projection_ewa_3dgs_packed_bwd_kernel(
     // grad outputs
     const at::Tensor v_means2d,                     // [nnz, 2]
     const at::Tensor v_depths,                      // [nnz]
+    const at::Tensor v_normals,                     // [nnz, 3]
     const at::Tensor v_conics,                      // [nnz, 3]
     const at::optional<at::Tensor> v_compensations, // [nnz] optional
     const bool sparse_grad,
@@ -736,6 +762,7 @@ void launch_projection_ewa_3dgs_packed_bwd_kernel(
                         : nullptr,
                     v_means2d.data_ptr<scalar_t>(),
                     v_depths.data_ptr<scalar_t>(),
+                    v_normals.data_ptr<scalar_t>(),
                     v_conics.data_ptr<scalar_t>(),
                     v_compensations.has_value()
                         ? v_compensations.value().data_ptr<scalar_t>()

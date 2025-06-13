@@ -35,6 +35,7 @@ __global__ void projection_ewa_3dgs_fused_fwd_kernel(
     int32_t *__restrict__ radii,         // [B, C, N, 2]
     scalar_t *__restrict__ means2d,      // [B, C, N, 2]
     scalar_t *__restrict__ depths,       // [B, C, N]
+    scalar_t *__restrict__ normals,      // [B, C, N, 3]
     scalar_t *__restrict__ conics,       // [B, C, N, 3]
     scalar_t *__restrict__ compensations // [B, C, N] optional
 ) {
@@ -77,6 +78,7 @@ __global__ void projection_ewa_3dgs_fused_fwd_kernel(
 
     // transform Gaussian covariance to camera space
     mat3 covar;
+    vec3 normal;
     if (covars != nullptr) {
         covars += bid * N * 6 + gid * 6;
         covar = mat3(
@@ -97,6 +99,8 @@ __global__ void projection_ewa_3dgs_fused_fwd_kernel(
         quat_scale_to_covar_preci(
             glm::make_vec4(quats), glm::make_vec3(scales), &covar, nullptr
         );
+        mat3 rotmat = quat_to_rotmat(glm::make_vec4(quats));
+        normal = rotmat[2];
     }
     mat3 covar_c;
     covarW2C(R, covar, covar_c);
@@ -203,6 +207,9 @@ __global__ void projection_ewa_3dgs_fused_fwd_kernel(
     means2d[idx * 2] = mean2d.x;
     means2d[idx * 2 + 1] = mean2d.y;
     depths[idx] = mean_c.z;
+    normals[idx * 3] = normal.x;
+    normals[idx * 3 + 1] = normal.y;
+    normals[idx * 3 + 2] = normal.z;
     conics[idx * 3] = covar2d_inv[0][0];
     conics[idx * 3 + 1] = covar2d_inv[0][1];
     conics[idx * 3 + 2] = covar2d_inv[1][1];
@@ -231,6 +238,7 @@ void launch_projection_ewa_3dgs_fused_fwd_kernel(
     at::Tensor radii,                      // [..., C, N, 2]
     at::Tensor means2d,                    // [..., C, N, 2]
     at::Tensor depths,                     // [..., C, N]
+    at::Tensor normals,                    // [..., C, N, 3]
     at::Tensor conics,                     // [..., C, N, 3]
     at::optional<at::Tensor> compensations // [..., C, N] optional
 ) {
@@ -281,6 +289,7 @@ void launch_projection_ewa_3dgs_fused_fwd_kernel(
                     radii.data_ptr<int32_t>(),
                     means2d.data_ptr<scalar_t>(),
                     depths.data_ptr<scalar_t>(),
+                    normals.data_ptr<scalar_t>(),
                     conics.data_ptr<scalar_t>(),
                     compensations.has_value()
                         ? compensations.value().data_ptr<scalar_t>()
@@ -313,6 +322,7 @@ __global__ void projection_ewa_3dgs_fused_bwd_kernel(
     // grad outputs
     const scalar_t *__restrict__ v_means2d,       // [B, C, N, 2]
     const scalar_t *__restrict__ v_depths,        // [B, C, N]
+    const scalar_t *__restrict__ v_normals,       // [B, C, N, 3]
     const scalar_t *__restrict__ v_conics,        // [B, C, N, 3]
     const scalar_t *__restrict__ v_compensations, // [B, C, N] optional
     // grad inputs
@@ -498,6 +508,13 @@ __global__ void projection_ewa_3dgs_fused_bwd_kernel(
         vec4 v_quat(0.f);
         vec3 v_scale(0.f);
         quat_scale_to_covar_vjp(quat, scale, rotmat, v_covar, v_quat, v_scale);
+        // add contribution from v_normals
+        v_normals += idx * 3;
+        quat_to_rotmat_vjp(
+            quat,
+            mat3(0.f, 0.f, 0.f, 0.f, 0.f, 0.f, v_normals[0], v_normals[1], v_normals[2]),
+            v_quat
+        );
         warpSum(v_quat, warp_group_g);
         warpSum(v_scale, warp_group_g);
         if (warp_group_g.thread_rank() == 0) {
@@ -550,6 +567,7 @@ void launch_projection_ewa_3dgs_fused_bwd_kernel(
     // grad outputs
     const at::Tensor v_means2d,                     // [..., C, N, 2]
     const at::Tensor v_depths,                      // [..., C, N]
+    const at::Tensor v_normals,                     // [..., C, N, 3]
     const at::Tensor v_conics,                      // [..., C, N, 3]
     const at::optional<at::Tensor> v_compensations, // [..., C, N] optional
     const bool viewmats_requires_grad,
@@ -606,6 +624,7 @@ void launch_projection_ewa_3dgs_fused_bwd_kernel(
                         : nullptr,
                     v_means2d.data_ptr<scalar_t>(),
                     v_depths.data_ptr<scalar_t>(),
+                    v_normals.data_ptr<scalar_t>(),
                     v_conics.data_ptr<scalar_t>(),
                     v_compensations.has_value()
                         ? v_compensations.value().data_ptr<scalar_t>()
