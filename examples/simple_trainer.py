@@ -965,6 +965,7 @@ class Runner:
                 sh_degree=cfg.sh_degree,
                 near_plane=cfg.near_plane,
                 far_plane=cfg.far_plane,
+                render_mode=self.render_mode,
                 masks=masks,
             )  # [1, H, W, 3]
             torch.cuda.synchronize()
