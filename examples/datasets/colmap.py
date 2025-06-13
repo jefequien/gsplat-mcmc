@@ -248,6 +248,7 @@ class Parser:
         self.image_names = image_names  # List[str], (num_images,)
         self.image_paths = image_paths  # List[str], (num_images,)
         self.camtoworlds = camtoworlds  # np.ndarray, (num_images, 4, 4)
+        self.image_times = np.linspace(0.0, 1.0, len(image_names))
         self.camera_ids = camera_ids  # List[int], (num_images,)
         self.Ks_dict = Ks_dict  # Dict of camera_id -> K
         self.params_dict = params_dict  # Dict of camera_id -> params
@@ -379,6 +380,7 @@ class Dataset:
         params = self.parser.params_dict[camera_id]
         camtoworlds = self.parser.camtoworlds[index]
         mask = self.parser.mask_dict[camera_id]
+        image_time = self.parser.image_times[index]
 
         if len(params) > 0:
             # Images are distorted. Undistort them.
@@ -404,7 +406,7 @@ class Dataset:
             "camtoworld": torch.from_numpy(camtoworlds).float(),
             "image": torch.from_numpy(image).float(),
             "image_id": item,  # the index of the image in the dataset
-            "image_time": torch.tensor(index / len(self.parser.image_paths)).float(),
+            "image_time": torch.tensor(image_time).float(),
         }
         if mask is not None:
             data["mask"] = torch.from_numpy(mask).bool()
