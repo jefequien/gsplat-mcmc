@@ -41,8 +41,6 @@ from gsplat.rendering import rasterization
 from gsplat.strategy import DefaultStrategy, MCMCStrategy
 from gsplat_viewer import GsplatViewer, GsplatRenderTabState
 from nerfview import CameraState, RenderTabState, apply_float_colormap
-import torchvision
-from difix.pipeline_difix import DifixPipeline
 
 @dataclass
 class Config:
@@ -86,9 +84,6 @@ class Config:
     eval_steps: List[int] = field(default_factory=lambda: [7_000, 30_000])
     # Steps to save the model
     save_steps: List[int] = field(default_factory=lambda: [7_000, 30_000])
-    # Steps to fix the artifacts
-    # fix_steps: List[int] = field(default_factory=lambda: [3_000, 6_000, 8_000, 10_000, 12_000, 14_000, 16_000, 18_000, 20_000, 22_000, 24_000, 26_000, 28_000, 30_000, 32_000, 34_000, 36_000, 38_000, 40_000, 42_000, 44_000, 46_000, 48_000, 50_000, 52_000, 54_000, 56_000, 58_000, 60_000])
-    # fix_steps: List[int] = field(default_factory=lambda: [8_000, 10_000, 12_000, 14_000, 16_000, 18_000, 20_000, 22_000, 24_000, 26_000, 28_000, 30_000])
     # Whether to save ply file (storage size can be large)
     save_ply: bool = False
     # Steps to save the model as ply
@@ -112,8 +107,6 @@ class Config:
     init_scale: float = 1.0
     # Weight for SSIM loss
     ssim_lambda: float = 0.2
-    # # Weight for iterative 3d update
-    # difix_data_lambda: float = 0.3
 
     # Near plane clipping distance
     near_plane: float = 0.01
@@ -347,8 +340,6 @@ class Runner:
         os.makedirs(self.render_dir, exist_ok=True)
         self.ply_dir = f"{cfg.result_dir}/ply"
         os.makedirs(self.ply_dir, exist_ok=True)
-        self.fix_dir = f"{cfg.result_dir}/fixes"
-        os.makedirs(self.fix_dir, exist_ok=True)
 
         # Tensorboard
         self.writer = SummaryWriter(log_dir=f"{cfg.result_dir}/tb")
@@ -501,13 +492,6 @@ class Runner:
                 output_dir=Path(cfg.result_dir),
                 mode="training",
             )
-        
-        # Diffusion fixer
-        # self.difix = DifixPipeline.from_pretrained("nvidia/difix_ref", trust_remote_code=True)
-        # self.difix.set_progress_bar_config(disable=True)
-        # self.difix.to("cuda")
-        self.fixloader_iter = None
-            
 
     def rasterize_splats(
         self,
@@ -643,20 +627,11 @@ class Runner:
                 self.viewer.lock.acquire()
                 tic = time.time()
 
-            # if self.fixloader_iter is None or random.random() < 0.7:
             try:
                 data = next(trainloader_iter)
             except StopIteration:
                 trainloader_iter = iter(trainloader)
                 data = next(trainloader_iter)
-            #     is_difix_data = False
-            # else:
-            #     try:
-            #         data = next(self.fixloader_iter)
-            #     except StopIteration:
-            #         self.fixloader_iter = iter(self.fixloader)
-            #         data = next(self.fixloader_iter)
-            #     is_difix_data = True
 
             camtoworlds = camtoworlds_gt = data["camtoworld"].to(device)  # [1, 4, 4]
             Ks = data["K"].to(device)  # [1, 3, 3]
@@ -683,10 +658,9 @@ class Runner:
             sh_degree_to_use = min(step // cfg.sh_degree_interval, cfg.sh_degree)
 
             # forward
-            if random.random() < 0.7:
-                render_times = image_times
-            else:
-                render_times = 1.0 - image_times.round()
+            render_times = image_times
+            # if random.random() < 0.3:
+            #     render_times = 1.0 - image_times.round()
             renders, alphas, info = self.rasterize_splats(
                 camtoworlds=camtoworlds,
                 Ks=Ks,
@@ -774,11 +748,8 @@ class Runner:
                 )
             
             # loss += 0.1 * torch.linalg.norm(self.splats["velocities"], dim=-1).mean()
-            # # Encourage durations to be as long as possible
-            # loss += 0.01 * (1.0 - torch.sigmoid(self.splats["durations"]).mean())
-
-            # if is_difix_data:
-            #     loss = loss * cfg.difix_data_lambda
+            # Encourage durations to be as long as possible
+            loss += 0.01 * (1.0 - torch.sigmoid(self.splats["durations"]).mean())
 
             loss.backward()
 
@@ -956,10 +927,6 @@ class Runner:
                 self.render_traj(step, render_traj_path="static_first_cam")
                 self.render_traj(step, render_traj_path="static_last_cam")
 
-            # # run fixer
-            # if step in [i - 1 for i in cfg.fix_steps]:
-            #     self.fix(step)
-
             # run compression
             if cfg.compression is not None and step in [i - 1 for i in cfg.eval_steps]:
                 self.run_compression(step=step)
@@ -976,93 +943,6 @@ class Runner:
                 )
                 # Update the scene.
                 self.viewer.update(step, num_train_rays_per_step)
-
-    # @torch.no_grad()
-    # def fix(self, step: int):
-    #     pipe = DifixPipeline.from_pretrained("nvidia/difix", trust_remote_code=True)
-    #     pipe.set_progress_bar_config(disable=True)
-    #     pipe.to("cuda")
-
-    #     device = self.device
-
-    #     camtoworlds_all = self.parser.camtoworlds
-    #     # image_times_np = np.random.rand(len(camtoworlds_all))
-    #     # image_times_np = np.random.rand(len(camtoworlds_all)).round()
-    #     # image_times_np = np.zeros(len(camtoworlds_all))
-    #     image_times_np = 1.0 - np.linspace(0.0, 1.0, len(camtoworlds_all)).round()
-        
-    #     camtoworlds_all = torch.from_numpy(camtoworlds_all).float().to(device)
-    #     image_times_all = torch.from_numpy(image_times_np).float().to(device)
-    #     K = torch.from_numpy(list(self.parser.Ks_dict.values())[0]).float().to(device)
-    #     width, height = list(self.parser.imsize_dict.values())[0]
-
-    #     fix_dir = os.path.join(self.fix_dir, f"step{step}")
-    #     os.makedirs(fix_dir, exist_ok=True)
-    #     fix_image_paths = []
-    #     for i in tqdm.trange(len(camtoworlds_all), desc="Rendering fixes"):
-    #         camtoworlds = camtoworlds_all[i : i + 1]
-    #         image_times = image_times_all[i: i + 1]
-    #         Ks = K[None]
-
-    #         colors, _, _ = self.rasterize_splats(
-    #             camtoworlds=camtoworlds,
-    #             Ks=Ks,
-    #             width=width,
-    #             height=height,
-    #             sh_degree=cfg.sh_degree,
-    #             near_plane=cfg.near_plane,
-    #             far_plane=cfg.far_plane,
-    #             image_times=image_times,
-    #         )  # [1, H, W, 3]
-    #         colors = torch.clamp(colors, 0.0, 1.0)
-
-    #         # Fix colors
-    #         # image_index = (ref_times * (len(self.parser.image_paths) - 1)).round().int()
-    #         # pixels = torch.from_numpy(imageio.imread(self.parser.image_paths[image_index])[..., :3]).float().unsqueeze(0).to(device) / 255.0
-    #         # colors_fix = self.difix("remove degradation", image=colors.permute(0, 3, 1, 2), ref_image=pixels.permute(0, 3, 1, 2), num_inference_steps=1, timesteps=[199], guidance_scale=0.0, output_type="pt").images
-    #         # colors_fix = self.difix("remove degradation", image=colors.permute(0, 3, 1, 2), num_inference_steps=1, timesteps=[199], guidance_scale=0.0, output_type="pt").images
-    #         # input_tensor = colors.permute(0, 3, 1, 2)
-
-    #         from einops import rearrange
-    #         prompt = "remove degradation"
-    #         input_tensor = rearrange(colors, "1 h w c -> 1 c h w")
-
-    #         output_image = pipe(prompt, image=input_tensor, num_inference_steps=1, timesteps=[199], guidance_scale=0.0, output_type="pt").images
-    #         colors_fix = torchvision.transforms.functional.resize(output_image, (colors.shape[1], colors.shape[2]))
-    #         colors_fix = colors_fix.permute(0, 2, 3, 1)
-
-    #         canvas_list = [colors_fix]
-    #         canvas = torch.cat(canvas_list, dim=2).squeeze(0).cpu().numpy()
-    #         canvas = (canvas * 255).astype(np.uint8)
-    #         fix_image_path = os.path.join(fix_dir, f"{i:04d}.png")
-    #         imageio.imwrite(
-    #             fix_image_path,
-    #             canvas,
-    #         )
-    #         fix_image_paths.append(fix_image_path)
-
-    #         canvas_list = [colors, colors_fix]
-    #         canvas = torch.cat(canvas_list, dim=2).squeeze(0).cpu().numpy()
-    #         canvas = (canvas * 255).astype(np.uint8)
-    #         fix_image_path = os.path.join(fix_dir, f"debug_{i:04d}.png")
-    #         imageio.imwrite(
-    #             fix_image_path,
-    #             canvas,
-    #         )
-
-    #     fixset = deepcopy(self.trainset)
-    #     fixset.parser.image_paths = fix_image_paths
-    #     fixset.parser.image_times = image_times_np
-
-    #     self.fixloader = torch.utils.data.DataLoader(
-    #         fixset,
-    #         batch_size=cfg.batch_size,
-    #         shuffle=True,
-    #         num_workers=4,
-    #         persistent_workers=True,
-    #         pin_memory=True,
-    #     )
-    #     self.fixloader_iter = iter(self.fixloader)
 
     @torch.no_grad()
     def eval(self, step: int, stage: str = "val"):
@@ -1225,7 +1105,6 @@ class Runner:
         K = torch.from_numpy(list(self.parser.Ks_dict.values())[0]).float().to(device)
         width, height = list(self.parser.imsize_dict.values())[0]
         image_times_all = torch.from_numpy(image_times_all).float().to(device)
-        # ref_times_all = torch.from_numpy(ref_times_all).float().to(device)
 
         # save to video
         video_dir = f"{cfg.result_dir}/videos"
@@ -1236,7 +1115,6 @@ class Runner:
             camtoworlds = camtoworlds_all[i : i + 1]
             Ks = K[None]
             image_times = image_times_all[i: i + 1]
-            # ref_times = ref_times_all[i: i + 1]
 
             renders, _, _ = self.rasterize_splats(
                 camtoworlds=camtoworlds,
@@ -1252,14 +1130,6 @@ class Runner:
             colors = torch.clamp(renders[..., 0:3], 0.0, 1.0)  # [1, H, W, 3]
             depths = renders[..., 3:4]  # [1, H, W, 1]
             depths = (depths - depths.min()) / (depths.max() - depths.min())
-
-            # Fix colors
-            # image_index = (ref_times * (len(self.parser.image_paths) - 1)).round().int()
-            # pixels = torch.from_numpy(imageio.imread(self.parser.image_paths[image_index])[..., :3]).float().unsqueeze(0).to(device) / 255.0
-            # colors_fix = self.difix("remove degradation", image=colors.permute(0, 3, 1, 2), ref_image=pixels.permute(0, 3, 1, 2), num_inference_steps=1, timesteps=[199], guidance_scale=0.0, output_type="pt").images
-            # colors_fix = torchvision.transforms.functional.resize(colors_fix, (colors.shape[1], colors.shape[2]))
-            # colors_fix = colors_fix.permute(0, 2, 3, 1)
-
             canvas_list = [colors, depths.repeat(1, 1, 1, 3)]
 
             # write images
