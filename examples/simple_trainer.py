@@ -659,8 +659,8 @@ class Runner:
 
             # forward
             render_times = image_times
-            # if random.random() < 0.3:
-            #     render_times = 1.0 - image_times.round()
+            if random.random() < 0.3:
+                render_times = (image_times + 0.5) % 1.0
             renders, alphas, info = self.rasterize_splats(
                 camtoworlds=camtoworlds,
                 Ks=Ks,
