@@ -285,7 +285,8 @@ def _world_to_cam(
 
 def _fully_fused_projection(
     means: Tensor,  # [..., N, 3]
-    covars: Tensor,  # [..., N, 3, 3]
+    quats: Tensor,  # [..., N, 4]
+    scales: Tensor,  # [..., N, 3]
     viewmats: Tensor,  # [..., C, 4, 4]
     Ks: Tensor,  # [..., C, 3, 3]
     width: int,
@@ -307,9 +308,14 @@ def _fully_fused_projection(
     N = means.shape[-2]
     C = viewmats.shape[-3]
     assert means.shape == batch_dims + (N, 3), means.shape
-    assert covars.shape == batch_dims + (N, 3, 3), covars.shape
+    assert quats.shape == batch_dims + (N, 4), quats.shape
+    assert scales.shape == batch_dims + (N, 3, 3), scales.shape
     assert viewmats.shape == batch_dims + (C, 4, 4), viewmats.shape
     assert Ks.shape == batch_dims + (C, 3, 3), Ks.shape
+
+    covars, _ = _quat_scale_to_covar_preci(quats, scales, triu=False)
+    normals = _quat_to_rotmat(quats)[..., 2]
+    normals = normals.repeat(viewmats.shape[0], 1, 1)
 
     means_c, covars_c = _world_to_cam(means, covars, viewmats)
 
@@ -367,7 +373,7 @@ def _fully_fused_projection(
     radius[~inside] = 0.0
 
     radii = radius.int()
-    return radii, means2d, depths, conics, compensations
+    return radii, means2d, depths, normals, conics, compensations
 
 
 @torch.no_grad()
