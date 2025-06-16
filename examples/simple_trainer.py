@@ -81,9 +81,9 @@ class Config:
     # Number of training steps
     max_steps: int = 30_000
     # Steps to evaluate the model
-    eval_steps: List[int] = field(default_factory=lambda: [7_000, 30_000])
+    eval_steps: List[int] = field(default_factory=lambda: [7_000, 15_000, 30_000])
     # Steps to save the model
-    save_steps: List[int] = field(default_factory=lambda: [7_000, 30_000])
+    save_steps: List[int] = field(default_factory=lambda: [7_000, 15_000, 30_000])
     # Whether to save ply file (storage size can be large)
     save_ply: bool = False
     # Steps to save the model as ply
@@ -671,9 +671,12 @@ class Runner:
             sh_degree_to_use = min(step // cfg.sh_degree_interval, cfg.sh_degree)
 
             # forward
-            render_times = image_times
-            if random.random() < 0.3:
+            use_random_time = random.random() < 0.3
+            if use_random_time:
                 render_times = (image_times + 0.5) % 1.0
+                # render_times = torch.rand_like(image_times)
+            else:
+                render_times = image_times
             renders, alphas, info = self.rasterize_splats(
                 camtoworlds=camtoworlds,
                 Ks=Ks,
@@ -768,7 +771,7 @@ class Runner:
             
             # loss += 0.1 * torch.linalg.norm(self.splats["velocities"], dim=-1).mean()
             # Encourage durations to be as long as possible
-            loss += 0.01 * (1.0 - torch.sigmoid(self.splats["durations"]).mean())
+            # loss += 0.01 * (1.0 - torch.sigmoid(self.splats["durations"]).mean())
 
             loss.backward()
 
