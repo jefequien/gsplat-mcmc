@@ -24,6 +24,7 @@ from datasets.traj import (
     generate_interpolated_path,
     generate_spiral_path,
 )
+# from projection import backproject_reproject, backproject_reproject_zbuffer_scatter
 from fused_ssim import fused_ssim
 from torch import Tensor
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -335,7 +336,8 @@ class Runner:
         self.world_size = world_size
         self.device = f"cuda:{local_rank}"
 
-        self.render_mode = "RGB"
+        # self.render_mode = "RGB"
+        self.render_mode = "RGB+ED"
         if cfg.depth_loss:
             self.render_mode = "RGB+ED"
         if cfg.normal_consistency_loss:
@@ -671,14 +673,19 @@ class Runner:
             sh_degree_to_use = min(step // cfg.sh_degree_interval, cfg.sh_degree)
 
             # forward
-            use_random_time = random.random() < 0.3
-            if use_random_time:
-                render_times = (image_times + 0.5) % 1.0
-                # render_times = torch.rand_like(image_times)
+            use_random = step > 3000 and random.random() < 0.3
+            if use_random:
+                # render_times = (image_times + 0.5) % 1.0
+                # render_times = image_times
+                random_idx = (torch.rand_like(image_times) * (len(self.parser.camtoworlds) - 1)).round().int()
+                render_camtoworlds = self.parser.camtoworlds[random_idx:random_idx + 1]
+                render_camtoworlds = torch.from_numpy(render_camtoworlds).float().to(device)
+                pixels_static = torch.from_numpy(imageio.imread(self.parser.image_paths[random_idx])[..., :3]).float().unsqueeze(0).to(device) / 255.0
             else:
-                render_times = image_times
+                # render_times = image_times
+                render_camtoworlds = camtoworlds
             renders, alphas, info = self.rasterize_splats(
-                camtoworlds=camtoworlds,
+                camtoworlds=render_camtoworlds,
                 Ks=Ks,
                 width=width,
                 height=height,
@@ -688,9 +695,33 @@ class Runner:
                 image_ids=image_ids,
                 render_mode=self.render_mode,
                 masks=masks,
-                image_times=render_times,
+                image_times=image_times,
             )
             colors = renders[..., :3]
+            depths = renders[..., -1:]
+            if use_random:
+                # canvas_list = [colors, pixels]
+
+                depths = renders[..., -1:]
+                pixels_p = pixels.permute(0, 3, 1, 2).contiguous()  # [1, 3, H, W]
+                depths_p = depths.permute(0, 3, 1, 2).contiguous()  # [1, 1, H, W]
+                pixels_warp, valid_mask = backproject_reproject_zbuffer_scatter(pixels_p, depths_p, Ks, torch.linalg.inv(camtoworlds), torch.linalg.inv(render_camtoworlds))
+                pixels = pixels_warp.permute(0, 2, 3, 1)
+                valid_mask = valid_mask.permute(0, 2, 3, 1)
+
+                # pixels_vis = pixels.clone()
+                # pixels_vis[~valid_mask.repeat(1, 1, 1, 3)] = 0
+                # canvas_list.append(pixels_vis)
+
+                pixels[~valid_mask.repeat(1, 1, 1, 3)] = pixels_static[~valid_mask.repeat(1, 1, 1, 3)]
+                # canvas_list.append(pixels.clone())
+
+                # canvas = torch.cat(canvas_list, dim=2).squeeze(0).detach().cpu().numpy()
+                # canvas = (canvas * 255).astype(np.uint8)
+                # imageio.imwrite(
+                #     f"{self.render_dir}/debug_step{step}.png",
+                #     canvas,
+                # )
 
             if cfg.use_bilateral_grid:
                 grid_y, grid_x = torch.meshgrid(
@@ -947,13 +978,13 @@ class Runner:
 
             # eval the full set
             if step in [i - 1 for i in cfg.eval_steps]:
+                self.eval_alt(step, stage="train")
+                self.eval_alt(step, stage="val")
                 self.eval(step, stage="train")
                 self.eval(step, stage="val")
                 self.render_traj(step, render_traj_path="interp")
-                self.render_traj(step, render_traj_path="interp_start_time")
-                self.render_traj(step, render_traj_path="interp_end_time")
-                self.render_traj(step, render_traj_path="static_first_cam")
-                self.render_traj(step, render_traj_path="static_last_cam")
+                self.render_traj(step, render_traj_path="fix_time-0.5")
+                self.render_traj(step, render_traj_path="fix_view-0.5")
 
             # run compression
             if cfg.compression is not None and step in [i - 1 for i in cfg.eval_steps]:
@@ -1021,7 +1052,7 @@ class Runner:
             if cfg.depth_loss:
                 depths = renders[..., -1:]
                 depths = (depths - depths.min()) / (depths.max() - depths.min())
-                canvas_list.append(depths)
+                canvas_list.append(depths.repeat(1, 1, 1, 3))
             if cfg.normal_consistency_loss:
                 normals_rend = info["normals_rend"]
                 normals_surf = info["normals_surf"]
@@ -1079,6 +1110,113 @@ class Runner:
             for k, v in stats.items():
                 self.writer.add_scalar(f"{stage}/{k}", v, step)
             self.writer.flush()
+    
+    @torch.no_grad()
+    def eval_alt(self, step: int, stage: str = "val"):
+        """Entry for evaluation."""
+        print("Running alterative evaluation...")
+        cfg = self.cfg
+        device = self.device
+        world_rank = self.world_rank
+        world_size = self.world_size
+
+        if stage == "train":
+            dataloader = torch.utils.data.DataLoader(
+                self.trainset, batch_size=1, shuffle=False, num_workers=1
+            )
+        else:
+            dataloader = torch.utils.data.DataLoader(
+                self.valset, batch_size=1, shuffle=False, num_workers=1
+            )
+        ellipse_time = 0
+        metrics = defaultdict(list)
+        for i, data in enumerate(dataloader):
+            camtoworlds = data["camtoworld"].to(device)
+            Ks = data["K"].to(device)
+            pixels = data["image"].to(device) / 255.0
+            masks = data["mask"].to(device) if "mask" in data else None
+            image_times = data["image_time"].to(device)
+            height, width = pixels.shape[1:3]
+
+            image_times = torch.zeros_like(image_times)
+            render_camtoworlds = self.parser.camtoworlds[0:1]
+            render_camtoworlds = torch.from_numpy(render_camtoworlds).float().to(device)
+
+            torch.cuda.synchronize()
+            tic = time.time()
+            renders, alphas, info = self.rasterize_splats(
+                camtoworlds=render_camtoworlds,
+                Ks=Ks,
+                width=width,
+                height=height,
+                sh_degree=cfg.sh_degree,
+                near_plane=cfg.near_plane,
+                far_plane=cfg.far_plane,
+                render_mode=self.render_mode,
+                masks=masks,
+                image_times=image_times,
+            )  # [1, H, W, 3]
+            torch.cuda.synchronize()
+            ellipse_time += max(time.time() - tic, 1e-10)
+
+            colors = torch.clamp(renders[..., 0:3], 0.0, 1.0)
+            canvas_list = [pixels, colors]
+
+            depths = renders[..., -1:]
+            pixels_p = pixels.permute(0, 3, 1, 2).contiguous()  # [1, 3, H, W]
+            depths_p = depths.permute(0, 3, 1, 2).contiguous()  # [1, 1, H, W]
+            pixels_warp, valid_mask = backproject_reproject_zbuffer_scatter(pixels_p, depths_p, Ks, torch.linalg.inv(camtoworlds), torch.linalg.inv(render_camtoworlds))
+            pixels = pixels_warp.permute(0, 2, 3, 1)
+            valid_mask = valid_mask.permute(0, 2, 3, 1)
+            # colors[~valid_mask.repeat(1, 1, 1, 3)] = 0
+            pixels[~valid_mask.repeat(1, 1, 1, 3)] = colors[~valid_mask.repeat(1, 1, 1, 3)]
+            canvas_list.extend([pixels, colors])
+            
+            if world_rank == 0:
+                # write images
+                canvas = torch.cat(canvas_list, dim=2).squeeze(0).cpu().numpy()
+                canvas = (canvas * 255).astype(np.uint8)
+                imageio.imwrite(
+                    f"{self.render_dir}/{stage}_alt_step{step}_{i:04d}.png",
+                    canvas,
+                )
+
+                pixels_p = pixels.permute(0, 3, 1, 2)  # [1, 3, H, W]
+                colors_p = colors.permute(0, 3, 1, 2)  # [1, 3, H, W]
+                metrics["psnr"].append(self.psnr(colors_p, pixels_p))
+                metrics["ssim"].append(self.ssim(colors_p, pixels_p))
+                metrics["lpips"].append(self.lpips(colors_p, pixels_p))
+
+        if world_rank == 0:
+            ellipse_time /= len(dataloader)
+
+            stats = {k: torch.stack(v).mean().item() for k, v in metrics.items()}
+            stats.update(
+                {
+                    "ellipse_time": ellipse_time,
+                    "num_GS": len(self.splats["means"]),
+                }
+            )
+            if cfg.use_bilateral_grid:
+                print(
+                    f"PSNR: {stats['psnr']:.3f}, SSIM: {stats['ssim']:.4f}, LPIPS: {stats['lpips']:.3f} "
+                    f"CC_PSNR: {stats['cc_psnr']:.3f}, CC_SSIM: {stats['cc_ssim']:.4f}, CC_LPIPS: {stats['cc_lpips']:.3f} "
+                    f"Time: {stats['ellipse_time']:.3f}s/image "
+                    f"Number of GS: {stats['num_GS']}"
+                )
+            else:
+                print(
+                    f"PSNR: {stats['psnr']:.3f}, SSIM: {stats['ssim']:.4f}, LPIPS: {stats['lpips']:.3f} "
+                    f"Time: {stats['ellipse_time']:.3f}s/image "
+                    f"Number of GS: {stats['num_GS']}"
+                )
+            # save stats as json
+            with open(f"{self.stats_dir}/{stage}_alt_step{step:04d}.json", "w") as f:
+                json.dump(stats, f)
+            # save stats to tensorboard
+            for k, v in stats.items():
+                self.writer.add_scalar(f"{stage}/{k}", v, step)
+            self.writer.flush()
 
     @torch.no_grad()
     def render_traj(self, step: int, render_traj_path: str):
@@ -1095,7 +1233,7 @@ class Runner:
             #     camtoworlds_all, 1
             # )  # [N, 3, 4]
             image_times_all = np.linspace(0.0, 1.0, len(camtoworlds_all))
-            ref_times_all = np.linspace(0.0, 1.0, len(camtoworlds_all))
+            # ref_times_all = np.linspace(0.0, 1.0, len(camtoworlds_all))
         elif render_traj_path == "ellipse":
             height = camtoworlds_all[:, 2, 3].mean()
             camtoworlds_all = generate_ellipse_path_z(
@@ -1111,18 +1249,24 @@ class Runner:
             image_times_all = np.linspace(0.0, 1.0, len(camtoworlds_all))
         elif render_traj_path == "interp_start_time":
             image_times_all = np.zeros(len(camtoworlds_all))
-            ref_times_all = np.linspace(0.0, 1.0, len(camtoworlds_all))
+            # ref_times_all = np.linspace(0.0, 1.0, len(camtoworlds_all))
         elif render_traj_path == "interp_end_time":
             image_times_all = np.ones(len(camtoworlds_all))
-            ref_times_all = np.linspace(0.0, 1.0, len(camtoworlds_all))
+            # ref_times_all = np.linspace(0.0, 1.0, len(camtoworlds_all))
         elif render_traj_path == "static_first_cam":
             camtoworlds_all = repeat(camtoworlds_all[0], "h w -> n h w", n=len(camtoworlds_all))
             image_times_all = np.linspace(0.0, 1.0, len(camtoworlds_all))
-            ref_times_all = np.zeros(len(camtoworlds_all))
+            # ref_times_all = np.zeros(len(camtoworlds_all))
         elif render_traj_path == "static_last_cam":
             camtoworlds_all = repeat(camtoworlds_all[-1], "h w -> n h w", n=len(camtoworlds_all))
             image_times_all = np.linspace(0.0, 1.0, len(camtoworlds_all))
-            ref_times_all = np.ones(len(camtoworlds_all))
+            # ref_times_all = np.ones(len(camtoworlds_all))
+        elif render_traj_path == "fix_view-0.5":
+            camtoworlds_all = repeat(camtoworlds_all[int(round(0.5 * len(camtoworlds_all)))], "h w -> n h w", n=len(camtoworlds_all))
+            image_times_all = np.linspace(0.0, 1.0, len(camtoworlds_all))
+            # ref_times_all = np.ones(len(camtoworlds_all))
+        elif render_traj_path == "fix_time-0.5":
+            image_times_all = 0.5 * np.ones(len(camtoworlds_all))
         else:
             raise ValueError(
                 f"Render trajectory type not supported: {render_traj_path}"
@@ -1170,7 +1314,7 @@ class Runner:
             if cfg.depth_loss:
                 depths = renders[..., -1:]
                 depths = (depths - depths.min()) / (depths.max() - depths.min())
-                canvas_list.append(depths)
+                canvas_list.append(depths.repeat(1, 1, 1, 3))
             if cfg.normal_consistency_loss:
                 normals_rend = info["normals_rend"]
                 normals_surf = info["normals_surf"]
@@ -1292,12 +1436,13 @@ def main(local_rank: int, world_rank, world_size: int, cfg: Config):
             runner.splats[k].data = torch.cat([ckpt["splats"][k] for ckpt in ckpts])
 
         step = ckpts[0]["step"]
-        # runner.eval(step=step)
+        # runner.eval_alt(step=step, stage="train")
+        # runner.eval_alt(step=step, stage="val")
+        # runner.eval(step=step, stage="train")
+        # runner.eval(step=step, stage="val")
         runner.render_traj(step=step, render_traj_path="interp")
-        runner.render_traj(step, render_traj_path="interp_start_time")
-        runner.render_traj(step, render_traj_path="interp_end_time")
-        runner.render_traj(step, render_traj_path="static_first_cam")
-        runner.render_traj(step, render_traj_path="static_last_cam")
+        runner.render_traj(step, render_traj_path="fix_time-0.5")
+        runner.render_traj(step, render_traj_path="fix_view-0.5")
         if cfg.compression is not None:
             runner.run_compression(step=step)
     else:
