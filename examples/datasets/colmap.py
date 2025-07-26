@@ -190,11 +190,11 @@ class Parser:
         # so we need to map between the two sorted lists of files.
         colmap_files = sorted(_get_rel_paths(colmap_image_dir))
         image_files = sorted(_get_rel_paths(image_dir))
-        if factor > 1 and os.path.splitext(image_files[0])[1].lower() == ".jpg":
-            image_dir = _resize_image_folder(
-                colmap_image_dir, image_dir + "_png", factor=factor
-            )
-            image_files = sorted(_get_rel_paths(image_dir))
+        # if factor > 1 and os.path.splitext(image_files[0])[1].lower() == ".jpg":
+        #     image_dir = _resize_image_folder(
+        #         colmap_image_dir, image_dir + "_png", factor=factor
+        #     )
+        #     image_files = sorted(_get_rel_paths(image_dir))
         colmap_to_image = dict(zip(colmap_files, image_files))
         image_paths = [os.path.join(image_dir, colmap_to_image[f]) for f in image_names]
 
@@ -364,10 +364,21 @@ class Dataset:
         self.patch_size = patch_size
         self.load_depths = load_depths
         indices = np.arange(len(self.parser.image_names))
+
+        test_indices = set()
+        test_segment_length = 4
+        for idx in indices:
+            in_test = (idx // test_segment_length) % self.parser.test_every == self.parser.test_every - 1
+            in_test = in_test and len(indices) - idx > 3
+            if in_test:
+                test_indices.add(idx)
+
         if split == "train":
-            self.indices = indices[indices % self.parser.test_every != 0]
+            # self.indices = indices[indices % self.parser.test_every != 0]
+            self.indices = np.array([idx for idx in indices if idx not in test_indices])
         else:
-            self.indices = indices[indices % self.parser.test_every == 0]
+            # self.indices = indices[indices % self.parser.test_every == 0]
+            self.indices = np.array([idx for idx in indices if idx in test_indices])
 
     def __len__(self):
         return len(self.indices)

@@ -24,7 +24,6 @@ from datasets.traj import (
     generate_interpolated_path,
     generate_spiral_path,
 )
-# from projection import backproject_reproject, backproject_reproject_zbuffer_scatter
 from fused_ssim import fused_ssim
 from torch import Tensor
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -33,6 +32,7 @@ from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMe
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 from typing_extensions import Literal, assert_never
 from utils import AppearanceOptModule, CameraOptModule, knn, rgb_to_sh, set_random_seed
+from deformation_opt import DeformationOptModule
 
 from gsplat import export_splats
 from gsplat.compression import PngCompression
@@ -166,6 +166,13 @@ class Config:
     # Regularization for appearance optimization as weight decay
     app_opt_reg: float = 1e-6
 
+    # Enable deformation optimization. (experimental)
+    deformation_opt: bool = False
+    # Learning rate for deformation optimization
+    deformation_opt_lr: float = 1e-3
+    # Regularization for deformation optimization as weight decay
+    deformation_opt_reg: float = 1e-6
+
     # Enable bilateral grid. (experimental)
     use_bilateral_grid: bool = False
     # Shape of the bilateral grid (X, Y, W)
@@ -235,6 +242,7 @@ def create_splats_with_optimizers(
     accelerations_lr: float = 1e-4,
     sh0_lr: float = 2.5e-3,
     shN_lr: float = 2.5e-3 / 20,
+    features_lr: float = 2.5e-3,
     scene_scale: float = 1.0,
     sh_degree: int = 3,
     sparse_grad: bool = False,
@@ -271,6 +279,7 @@ def create_splats_with_optimizers(
     durations = torch.logit(torch.full((N,), 0.01))
     velocities = torch.zeros((N, 3))
     accelerations = torch.zeros((N, 3))
+    features = torch.zeros(N, 8)  # [N, feature_dim]
 
     params = [
         # name, value, lr
@@ -278,6 +287,7 @@ def create_splats_with_optimizers(
         ("scales", torch.nn.Parameter(scales), scales_lr),
         ("quats", torch.nn.Parameter(quats), quats_lr),
         ("opacities", torch.nn.Parameter(opacities), opacities_lr),
+        ("features", torch.nn.Parameter(features), features_lr),
         ("times", torch.nn.Parameter(times), times_lr),
         ("durations", torch.nn.Parameter(durations), durations_lr),
         ("velocities", torch.nn.Parameter(velocities), velocities_lr),
@@ -465,6 +475,18 @@ class Runner:
             ]
             if world_size > 1:
                 self.app_module = DDP(self.app_module)
+                self.blur_optimizers = []
+        if cfg.deformation_opt:
+            self.deformation_module = DeformationOptModule(len(self.trainset)).to(self.device)
+            self.deformation_optimizers = [
+                torch.optim.Adam(
+                    self.deformation_module.parameters(),
+                    lr=cfg.deformation_opt_lr * math.sqrt(cfg.batch_size),
+                    weight_decay=cfg.deformation_opt_reg,
+                ),
+            ]
+            if world_size > 1:
+                self.deformation_module = DDP(self.deformation_module)
 
         self.bil_grid_optimizers = []
         if cfg.use_bilateral_grid:
@@ -515,23 +537,35 @@ class Runner:
         width: int,
         height: int,
         masks: Optional[Tensor] = None,
+        render_times: Optional[Tensor] = None,
         image_times: Optional[Tensor] = None,
         rasterize_mode: Optional[Literal["classic", "antialiased"]] = None,
         camera_model: Optional[Literal["pinhole", "ortho", "fisheye"]] = None,
         **kwargs,
     ) -> Tuple[Tensor, Tensor, Dict]:
-        # means = self.splats["means"]  # [N, 3]
+        means = self.splats["means"]  # [N, 3]
         # quats = F.normalize(self.splats["quats"], dim=-1)  # [N, 4]
         # rasterization does normalization internally
         quats = self.splats["quats"]  # [N, 4]
         scales = torch.exp(self.splats["scales"])  # [N, 3]
-        # opacities = torch.sigmoid(self.splats["opacities"])  # [N,]
+        opacities = torch.sigmoid(self.splats["opacities"])  # [N,]
 
-        times = torch.sigmoid(self.splats["times"])
-        delta_times = (image_times - times)[:, None]
-        durations = 10.0 * torch.sigmoid(self.splats["durations"])
-        means = self.splats["means"] + self.splats["velocities"] * delta_times + 0.5 * self.splats["accelerations"] * delta_times ** 2
-        opacities = torch.sigmoid(self.splats["opacities"]) * torch.exp(-0.5 * ((image_times - times) / durations) ** 2)
+        # times = torch.sigmoid(self.splats["times"])
+        # delta_times = (render_times - times)[:, None]
+        # durations = 10.0 * torch.sigmoid(self.splats["durations"])
+        # means = self.splats["means"] + self.splats["velocities"] * delta_times + 0.5 * self.splats["accelerations"] * delta_times ** 2
+        # opacities = torch.sigmoid(self.splats["opacities"]) * torch.exp(-0.5 * ((render_times - times) / durations) ** 2)
+
+        # if not torch.allclose(render_times, image_times):
+        #     print("Using deformation module")
+        means, quats = self.deformation_module(
+            means=means, 
+            quats=quats, 
+            sh0=self.splats["sh0"], 
+            features=self.splats["features"],
+            render_times=render_times,
+            image_times=image_times, 
+        )
 
         image_ids = kwargs.pop("image_ids", None)
         if self.cfg.app_opt:
@@ -673,19 +707,13 @@ class Runner:
             sh_degree_to_use = min(step // cfg.sh_degree_interval, cfg.sh_degree)
 
             # forward
-            use_random = step > 3000 and random.random() < 0.3
-            if use_random:
-                # render_times = (image_times + 0.5) % 1.0
-                # render_times = image_times
-                random_idx = (torch.rand_like(image_times) * (len(self.parser.camtoworlds) - 1)).round().int()
-                render_camtoworlds = self.parser.camtoworlds[random_idx:random_idx + 1]
-                render_camtoworlds = torch.from_numpy(render_camtoworlds).float().to(device)
-                pixels_static = torch.from_numpy(imageio.imread(self.parser.image_paths[random_idx])[..., :3]).float().unsqueeze(0).to(device) / 255.0
-            else:
-                # render_times = image_times
-                render_camtoworlds = camtoworlds
+            # use_random = step > 3000 and random.random() < 0.3
+            # if use_random:
+            #     render_times = torch.rand_like(image_times)
+            # else:
+            # render_times = image_times
             renders, alphas, info = self.rasterize_splats(
-                camtoworlds=render_camtoworlds,
+                camtoworlds=camtoworlds,
                 Ks=Ks,
                 width=width,
                 height=height,
@@ -695,33 +723,11 @@ class Runner:
                 image_ids=image_ids,
                 render_mode=self.render_mode,
                 masks=masks,
+                render_times=image_times,
                 image_times=image_times,
             )
             colors = renders[..., :3]
             depths = renders[..., -1:]
-            if use_random:
-                # canvas_list = [colors, pixels]
-
-                depths = renders[..., -1:]
-                pixels_p = pixels.permute(0, 3, 1, 2).contiguous()  # [1, 3, H, W]
-                depths_p = depths.permute(0, 3, 1, 2).contiguous()  # [1, 1, H, W]
-                pixels_warp, valid_mask = backproject_reproject_zbuffer_scatter(pixels_p, depths_p, Ks, torch.linalg.inv(camtoworlds), torch.linalg.inv(render_camtoworlds))
-                pixels = pixels_warp.permute(0, 2, 3, 1)
-                valid_mask = valid_mask.permute(0, 2, 3, 1)
-
-                # pixels_vis = pixels.clone()
-                # pixels_vis[~valid_mask.repeat(1, 1, 1, 3)] = 0
-                # canvas_list.append(pixels_vis)
-
-                pixels[~valid_mask.repeat(1, 1, 1, 3)] = pixels_static[~valid_mask.repeat(1, 1, 1, 3)]
-                # canvas_list.append(pixels.clone())
-
-                # canvas = torch.cat(canvas_list, dim=2).squeeze(0).detach().cpu().numpy()
-                # canvas = (canvas * 255).astype(np.uint8)
-                # imageio.imwrite(
-                #     f"{self.render_dir}/debug_step{step}.png",
-                #     canvas,
-                # )
 
             if cfg.use_bilateral_grid:
                 grid_y, grid_x = torch.meshgrid(
@@ -803,6 +809,8 @@ class Runner:
             # loss += 0.1 * torch.linalg.norm(self.splats["velocities"], dim=-1).mean()
             # Encourage durations to be as long as possible
             # loss += 0.01 * (1.0 - torch.sigmoid(self.splats["durations"]).mean())
+            # loss += 0.01 * torch.abs(self.splats["features"]).mean()
+            # loss += self.deformation_module.alap_loss()
 
             loss.backward()
 
@@ -872,6 +880,11 @@ class Runner:
                         data["app_module"] = self.app_module.module.state_dict()
                     else:
                         data["app_module"] = self.app_module.state_dict()
+                if cfg.deformation_opt:
+                    if world_size > 1:
+                        data["deformation_module"] = self.deformation_module.module.state_dict()
+                    else:
+                        data["deformation_module"] = self.deformation_module.state_dict()
                 torch.save(
                     data, f"{self.ckpt_dir}/ckpt_{step}_rank{self.world_rank}.pt"
                 )
@@ -948,6 +961,9 @@ class Runner:
             for optimizer in self.app_optimizers:
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)
+            for optimizer in self.deformation_optimizers:
+                optimizer.step()
+                optimizer.zero_grad(set_to_none=True)
             for optimizer in self.bil_grid_optimizers:
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)
@@ -978,13 +994,15 @@ class Runner:
 
             # eval the full set
             if step in [i - 1 for i in cfg.eval_steps]:
-                self.eval_alt(step, stage="train")
-                self.eval_alt(step, stage="val")
                 self.eval(step, stage="train")
                 self.eval(step, stage="val")
-                self.render_traj(step, render_traj_path="interp")
+                self.render_traj(step, render_traj_path="exact")
+                self.render_traj(step, render_traj_path="fix_time-0.0")
+                self.render_traj(step, render_traj_path="fix_view-0.0")
                 self.render_traj(step, render_traj_path="fix_time-0.5")
                 self.render_traj(step, render_traj_path="fix_view-0.5")
+                self.render_traj(step, render_traj_path="fix_time-1.0")
+                self.render_traj(step, render_traj_path="fix_view-1.0")
 
             # run compression
             if cfg.compression is not None and step in [i - 1 for i in cfg.eval_steps]:
@@ -1042,6 +1060,7 @@ class Runner:
                 far_plane=cfg.far_plane,
                 render_mode=self.render_mode,
                 masks=masks,
+                render_times=image_times,
                 image_times=image_times,
             )  # [1, H, W, 3]
             torch.cuda.synchronize()
@@ -1110,113 +1129,6 @@ class Runner:
             for k, v in stats.items():
                 self.writer.add_scalar(f"{stage}/{k}", v, step)
             self.writer.flush()
-    
-    @torch.no_grad()
-    def eval_alt(self, step: int, stage: str = "val"):
-        """Entry for evaluation."""
-        print("Running alterative evaluation...")
-        cfg = self.cfg
-        device = self.device
-        world_rank = self.world_rank
-        world_size = self.world_size
-
-        if stage == "train":
-            dataloader = torch.utils.data.DataLoader(
-                self.trainset, batch_size=1, shuffle=False, num_workers=1
-            )
-        else:
-            dataloader = torch.utils.data.DataLoader(
-                self.valset, batch_size=1, shuffle=False, num_workers=1
-            )
-        ellipse_time = 0
-        metrics = defaultdict(list)
-        for i, data in enumerate(dataloader):
-            camtoworlds = data["camtoworld"].to(device)
-            Ks = data["K"].to(device)
-            pixels = data["image"].to(device) / 255.0
-            masks = data["mask"].to(device) if "mask" in data else None
-            image_times = data["image_time"].to(device)
-            height, width = pixels.shape[1:3]
-
-            image_times = torch.zeros_like(image_times)
-            render_camtoworlds = self.parser.camtoworlds[0:1]
-            render_camtoworlds = torch.from_numpy(render_camtoworlds).float().to(device)
-
-            torch.cuda.synchronize()
-            tic = time.time()
-            renders, alphas, info = self.rasterize_splats(
-                camtoworlds=render_camtoworlds,
-                Ks=Ks,
-                width=width,
-                height=height,
-                sh_degree=cfg.sh_degree,
-                near_plane=cfg.near_plane,
-                far_plane=cfg.far_plane,
-                render_mode=self.render_mode,
-                masks=masks,
-                image_times=image_times,
-            )  # [1, H, W, 3]
-            torch.cuda.synchronize()
-            ellipse_time += max(time.time() - tic, 1e-10)
-
-            colors = torch.clamp(renders[..., 0:3], 0.0, 1.0)
-            canvas_list = [pixels, colors]
-
-            depths = renders[..., -1:]
-            pixels_p = pixels.permute(0, 3, 1, 2).contiguous()  # [1, 3, H, W]
-            depths_p = depths.permute(0, 3, 1, 2).contiguous()  # [1, 1, H, W]
-            pixels_warp, valid_mask = backproject_reproject_zbuffer_scatter(pixels_p, depths_p, Ks, torch.linalg.inv(camtoworlds), torch.linalg.inv(render_camtoworlds))
-            pixels = pixels_warp.permute(0, 2, 3, 1)
-            valid_mask = valid_mask.permute(0, 2, 3, 1)
-            # colors[~valid_mask.repeat(1, 1, 1, 3)] = 0
-            pixels[~valid_mask.repeat(1, 1, 1, 3)] = colors[~valid_mask.repeat(1, 1, 1, 3)]
-            canvas_list.extend([pixels, colors])
-            
-            if world_rank == 0:
-                # write images
-                canvas = torch.cat(canvas_list, dim=2).squeeze(0).cpu().numpy()
-                canvas = (canvas * 255).astype(np.uint8)
-                imageio.imwrite(
-                    f"{self.render_dir}/{stage}_alt_step{step}_{i:04d}.png",
-                    canvas,
-                )
-
-                pixels_p = pixels.permute(0, 3, 1, 2)  # [1, 3, H, W]
-                colors_p = colors.permute(0, 3, 1, 2)  # [1, 3, H, W]
-                metrics["psnr"].append(self.psnr(colors_p, pixels_p))
-                metrics["ssim"].append(self.ssim(colors_p, pixels_p))
-                metrics["lpips"].append(self.lpips(colors_p, pixels_p))
-
-        if world_rank == 0:
-            ellipse_time /= len(dataloader)
-
-            stats = {k: torch.stack(v).mean().item() for k, v in metrics.items()}
-            stats.update(
-                {
-                    "ellipse_time": ellipse_time,
-                    "num_GS": len(self.splats["means"]),
-                }
-            )
-            if cfg.use_bilateral_grid:
-                print(
-                    f"PSNR: {stats['psnr']:.3f}, SSIM: {stats['ssim']:.4f}, LPIPS: {stats['lpips']:.3f} "
-                    f"CC_PSNR: {stats['cc_psnr']:.3f}, CC_SSIM: {stats['cc_ssim']:.4f}, CC_LPIPS: {stats['cc_lpips']:.3f} "
-                    f"Time: {stats['ellipse_time']:.3f}s/image "
-                    f"Number of GS: {stats['num_GS']}"
-                )
-            else:
-                print(
-                    f"PSNR: {stats['psnr']:.3f}, SSIM: {stats['ssim']:.4f}, LPIPS: {stats['lpips']:.3f} "
-                    f"Time: {stats['ellipse_time']:.3f}s/image "
-                    f"Number of GS: {stats['num_GS']}"
-                )
-            # save stats as json
-            with open(f"{self.stats_dir}/{stage}_alt_step{step:04d}.json", "w") as f:
-                json.dump(stats, f)
-            # save stats to tensorboard
-            for k, v in stats.items():
-                self.writer.add_scalar(f"{stage}/{k}", v, step)
-            self.writer.flush()
 
     @torch.no_grad()
     def render_traj(self, step: int, render_traj_path: str):
@@ -1229,11 +1141,10 @@ class Runner:
 
         camtoworlds_all = self.parser.camtoworlds
         if render_traj_path == "interp":
-            # camtoworlds_all = generate_interpolated_path(
-            #     camtoworlds_all, 1
-            # )  # [N, 3, 4]
+            camtoworlds_all = generate_interpolated_path(
+                camtoworlds_all, 1
+            )  # [N, 3, 4]
             image_times_all = np.linspace(0.0, 1.0, len(camtoworlds_all))
-            # ref_times_all = np.linspace(0.0, 1.0, len(camtoworlds_all))
         elif render_traj_path == "ellipse":
             height = camtoworlds_all[:, 2, 3].mean()
             camtoworlds_all = generate_ellipse_path_z(
@@ -1247,26 +1158,17 @@ class Runner:
                 spiral_scale_r=self.parser.extconf["spiral_radius_scale"],
             )
             image_times_all = np.linspace(0.0, 1.0, len(camtoworlds_all))
-        elif render_traj_path == "interp_start_time":
-            image_times_all = np.zeros(len(camtoworlds_all))
-            # ref_times_all = np.linspace(0.0, 1.0, len(camtoworlds_all))
-        elif render_traj_path == "interp_end_time":
-            image_times_all = np.ones(len(camtoworlds_all))
-            # ref_times_all = np.linspace(0.0, 1.0, len(camtoworlds_all))
-        elif render_traj_path == "static_first_cam":
-            camtoworlds_all = repeat(camtoworlds_all[0], "h w -> n h w", n=len(camtoworlds_all))
+        elif render_traj_path == "exact":
+            camtoworlds_all = self.parser.camtoworlds
+            image_times_all = self.parser.image_times
+        elif "fix_view" in render_traj_path:
+            x = float(render_traj_path.split("-")[1])
+            camtoworlds_all = repeat(camtoworlds_all[int(round(x * (len(camtoworlds_all) - 1)))], "h w -> n h w", n=len(camtoworlds_all))
             image_times_all = np.linspace(0.0, 1.0, len(camtoworlds_all))
-            # ref_times_all = np.zeros(len(camtoworlds_all))
-        elif render_traj_path == "static_last_cam":
-            camtoworlds_all = repeat(camtoworlds_all[-1], "h w -> n h w", n=len(camtoworlds_all))
-            image_times_all = np.linspace(0.0, 1.0, len(camtoworlds_all))
-            # ref_times_all = np.ones(len(camtoworlds_all))
-        elif render_traj_path == "fix_view-0.5":
-            camtoworlds_all = repeat(camtoworlds_all[int(round(0.5 * len(camtoworlds_all)))], "h w -> n h w", n=len(camtoworlds_all))
-            image_times_all = np.linspace(0.0, 1.0, len(camtoworlds_all))
-            # ref_times_all = np.ones(len(camtoworlds_all))
-        elif render_traj_path == "fix_time-0.5":
-            image_times_all = 0.5 * np.ones(len(camtoworlds_all))
+        elif "fix_time" in render_traj_path:
+            x = float(render_traj_path.split("-")[1])
+            camtoworlds_all = self.parser.camtoworlds
+            image_times_all = x * np.ones(len(camtoworlds_all))
         else:
             raise ValueError(
                 f"Render trajectory type not supported: {render_traj_path}"
@@ -1307,6 +1209,7 @@ class Runner:
                 near_plane=cfg.near_plane,
                 far_plane=cfg.far_plane,
                 render_mode=self.render_mode,
+                render_times=image_times,
                 image_times=image_times,
             )  # [1, H, W, 4]
             colors = torch.clamp(renders[..., 0:3], 0.0, 1.0)
@@ -1436,13 +1339,15 @@ def main(local_rank: int, world_rank, world_size: int, cfg: Config):
             runner.splats[k].data = torch.cat([ckpt["splats"][k] for ckpt in ckpts])
 
         step = ckpts[0]["step"]
-        # runner.eval_alt(step=step, stage="train")
-        # runner.eval_alt(step=step, stage="val")
-        # runner.eval(step=step, stage="train")
-        # runner.eval(step=step, stage="val")
-        runner.render_traj(step=step, render_traj_path="interp")
+        runner.eval(step=step, stage="train")
+        runner.eval(step=step, stage="val")
+        runner.render_traj(step, render_traj_path="exact")
+        runner.render_traj(step, render_traj_path="fix_time-0.0")
+        runner.render_traj(step, render_traj_path="fix_view-0.0")
         runner.render_traj(step, render_traj_path="fix_time-0.5")
         runner.render_traj(step, render_traj_path="fix_view-0.5")
+        runner.render_traj(step, render_traj_path="fix_time-1.0")
+        runner.render_traj(step, render_traj_path="fix_view-1.0")
         if cfg.compression is not None:
             runner.run_compression(step=step)
     else:

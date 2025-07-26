@@ -8,7 +8,7 @@ from torch import Tensor
 from gsplat import quat_scale_to_covar_preci
 from gsplat.relocation import compute_relocation
 from gsplat.utils import normalized_quat_to_rotmat
-
+from .morton import morton_sort
 
 @torch.no_grad()
 def _multinomial_sample(weights: Tensor, n: int, replacement: bool = True) -> Tensor:
@@ -338,6 +338,25 @@ def sample_add(
         v_new = torch.zeros((len(sampled_idxs), *v.shape[1:]), device=v.device)
         if isinstance(v, torch.Tensor):
             state[k] = torch.cat((v, v_new))
+
+
+@torch.no_grad()
+def sort_morton(
+    params: Union[Dict[str, torch.nn.Parameter], torch.nn.ParameterDict],
+    optimizers: Dict[str, torch.optim.Optimizer],
+):
+    sorted_idxs = morton_sort(params["means"], voxel_size=0.05)
+
+    def param_fn(name: str, p: Tensor) -> Tensor:
+        p.data = p.data[sorted_idxs]
+        return p
+
+    def optimizer_fn(key: str, v: Tensor) -> Tensor:
+        v = v[sorted_idxs]
+        return v
+
+    # update the parameters and the state in the optimizers
+    _update_param_with_optimizer(param_fn, optimizer_fn, params, optimizers)
 
 
 @torch.no_grad()

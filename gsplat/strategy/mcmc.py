@@ -6,8 +6,7 @@ import torch
 from torch import Tensor
 
 from .base import Strategy
-from .ops import inject_noise_to_position, relocate, sample_add
-
+from .ops import inject_noise_to_position, relocate, sample_add, sort_morton
 
 @dataclass
 class MCMCStrategy(Strategy):
@@ -136,6 +135,8 @@ class MCMCStrategy(Strategy):
                     f"Step {step}: Added {n_new_gs} GSs. "
                     f"Now having {len(params['means'])} GSs."
                 )
+            
+            # self._sort(params, optimizers)
 
             torch.cuda.empty_cache()
 
@@ -185,3 +186,14 @@ class MCMCStrategy(Strategy):
                 min_opacity=self.min_opacity,
             )
         return n_gs
+
+    @torch.no_grad()
+    def _sort(
+        self,
+        params: Union[Dict[str, torch.nn.Parameter], torch.nn.ParameterDict],
+        optimizers: Dict[str, torch.optim.Optimizer],
+    ):
+        sort_morton(
+            params=params,
+            optimizers=optimizers,
+        )
