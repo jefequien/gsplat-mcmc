@@ -94,17 +94,17 @@ def _create_mlp_tcnn(
         layer_width=layer_width,
         num_layers=num_layers,
     )
-    tcnn_encoding = tcnn.Network(
+    model = tcnn.Network(
         n_input_dims=in_dim,
         n_output_dims=out_dim,
         network_config=network_config,
     )
     if initialize_last_layer_zeros:
         # tcnn always pads the output layer's width to a multiple of 16
-        params = tcnn_encoding.state_dict()["params"]
+        params = model.state_dict()["params"]
         params[-1 * (layer_width * 16 * (out_dim // 16 + 1)) :] = 0
-        tcnn_encoding.load_state_dict({"params": params})
-    return tcnn_encoding
+        model.load_state_dict({"params": params})
+    return model
 
 
 def _create_mlp_torch(

@@ -236,13 +236,13 @@ def create_splats_with_optimizers(
     scales_lr: float = 5e-3,
     opacities_lr: float = 5e-2,
     quats_lr: float = 1e-3,
-    times_lr: float = 5e-3,
-    durations_lr: float = 5e-3,
-    velocities_lr: float = 2e-4,
-    accelerations_lr: float = 1e-4,
+    # times_lr: float = 5e-3,
+    # durations_lr: float = 5e-3,
+    # velocities_lr: float = 2e-4,
+    # accelerations_lr: float = 1e-4,
     sh0_lr: float = 2.5e-3,
     shN_lr: float = 2.5e-3 / 20,
-    features_lr: float = 2.5e-3,
+    # features_lr: float = 2.5e-3,
     scene_scale: float = 1.0,
     sh_degree: int = 3,
     sparse_grad: bool = False,
@@ -275,11 +275,11 @@ def create_splats_with_optimizers(
     N = points.shape[0]
     quats = torch.rand((N, 4))  # [N, 4]
     opacities = torch.logit(torch.full((N,), init_opacity))  # [N,]
-    times = torch.rand((N,)) * 2.0 - 1.0
-    durations = torch.logit(torch.full((N,), 0.01))
-    velocities = torch.zeros((N, 3))
-    accelerations = torch.zeros((N, 3))
-    features = torch.zeros(N, 8)  # [N, feature_dim]
+    # times = torch.rand((N,)) * 2.0 - 1.0
+    # durations = torch.logit(torch.full((N,), 0.01))
+    # velocities = torch.zeros((N, 3))
+    # accelerations = torch.zeros((N, 3))
+    # features = torch.zeros(N, 8)  # [N, feature_dim]
 
     params = [
         # name, value, lr
@@ -287,11 +287,11 @@ def create_splats_with_optimizers(
         ("scales", torch.nn.Parameter(scales), scales_lr),
         ("quats", torch.nn.Parameter(quats), quats_lr),
         ("opacities", torch.nn.Parameter(opacities), opacities_lr),
-        ("features", torch.nn.Parameter(features), features_lr),
-        ("times", torch.nn.Parameter(times), times_lr),
-        ("durations", torch.nn.Parameter(durations), durations_lr),
-        ("velocities", torch.nn.Parameter(velocities), velocities_lr),
-        ("accelerations", torch.nn.Parameter(accelerations), accelerations_lr),
+        # ("features", torch.nn.Parameter(features), features_lr),
+        # ("times", torch.nn.Parameter(times), times_lr),
+        # ("durations", torch.nn.Parameter(durations), durations_lr),
+        # ("velocities", torch.nn.Parameter(velocities), velocities_lr),
+        # ("accelerations", torch.nn.Parameter(accelerations), accelerations_lr),
     ]
 
     if feature_dim is None:
@@ -537,7 +537,7 @@ class Runner:
         width: int,
         height: int,
         masks: Optional[Tensor] = None,
-        render_times: Optional[Tensor] = None,
+        # render_times: Optional[Tensor] = None,
         image_times: Optional[Tensor] = None,
         rasterize_mode: Optional[Literal["classic", "antialiased"]] = None,
         camera_model: Optional[Literal["pinhole", "ortho", "fisheye"]] = None,
@@ -561,9 +561,9 @@ class Runner:
         means, quats = self.deformation_module(
             means=means, 
             quats=quats, 
-            sh0=self.splats["sh0"], 
-            features=self.splats["features"],
-            render_times=render_times,
+            # sh0=self.splats["sh0"], 
+            # features=self.splats["features"],
+            # render_times=render_times,
             image_times=image_times, 
         )
 
@@ -723,7 +723,7 @@ class Runner:
                 image_ids=image_ids,
                 render_mode=self.render_mode,
                 masks=masks,
-                render_times=image_times,
+                # render_times=image_times,
                 image_times=image_times,
             )
             colors = renders[..., :3]
@@ -1060,7 +1060,7 @@ class Runner:
                 far_plane=cfg.far_plane,
                 render_mode=self.render_mode,
                 masks=masks,
-                render_times=image_times,
+                # render_times=image_times,
                 image_times=image_times,
             )  # [1, H, W, 3]
             torch.cuda.synchronize()
@@ -1209,7 +1209,7 @@ class Runner:
                 near_plane=cfg.near_plane,
                 far_plane=cfg.far_plane,
                 render_mode=self.render_mode,
-                render_times=image_times,
+                # render_times=image_times,
                 image_times=image_times,
             )  # [1, H, W, 4]
             colors = torch.clamp(renders[..., 0:3], 0.0, 1.0)
