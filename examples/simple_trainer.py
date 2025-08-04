@@ -795,23 +795,14 @@ class Runner:
 
             # regularizations
             if cfg.opacity_reg > 0.0:
-                loss = (
-                    loss
-                    + cfg.opacity_reg
-                    * torch.abs(torch.sigmoid(self.splats["opacities"])).mean()
-                )
+                loss += cfg.opacity_reg * torch.sigmoid(self.splats["opacities"]).mean()
             if cfg.scale_reg > 0.0:
-                loss = (
-                    loss
-                    + cfg.scale_reg * torch.abs(torch.exp(self.splats["scales"])).mean()
-                )
-            
+                loss += cfg.scale_reg * torch.exp(self.splats["scales"]).mean()
             # loss += 0.1 * torch.linalg.norm(self.splats["velocities"], dim=-1).mean()
             # Encourage durations to be as long as possible
             # loss += 0.01 * (1.0 - torch.sigmoid(self.splats["durations"]).mean())
             # loss += 0.01 * torch.abs(self.splats["features"]).mean()
             # loss += self.deformation_module.alap_loss()
-
             loss.backward()
 
             desc = f"loss={loss.item():.3f}| " f"sh degree={sh_degree_to_use}| "

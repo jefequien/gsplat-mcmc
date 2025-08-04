@@ -296,7 +296,7 @@ def _fully_fused_projection(
     near_plane: float = 0.01,
     far_plane: float = 1e10,
     calc_compensations: bool = False,
-    camera_model: Literal["pinhole", "ortho", "fisheye"] = "pinhole",
+    camera_model: Literal["pinhole", "ortho", "fisheye", "ftheta"] = "pinhole",
 ) -> Tuple[Tensor, Tensor, Tensor, Tensor, Optional[Tensor]]:
     """PyTorch implementation of `gsplat.cuda._wrapper.fully_fused_projection()`
 
@@ -313,6 +313,9 @@ def _fully_fused_projection(
     assert scales.shape == batch_dims + (N, 3), scales.shape
     assert viewmats.shape == batch_dims + (C, 4, 4), viewmats.shape
     assert Ks.shape == batch_dims + (C, 3, 3), Ks.shape
+    assert (
+        camera_model != "ftheta"
+    ), "ftheta camera is only supported via UT, please set with_ut=True in the rasterization()"
 
     covars, _ = _quat_scale_to_covar_preci(quats, scales, triu=False)
     normals = _quat_to_rotmat(quats)[..., 2]
