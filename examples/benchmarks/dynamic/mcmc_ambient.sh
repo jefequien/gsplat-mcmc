@@ -12,10 +12,10 @@ SCENE_LIST=(
     "dyntree_IMG_1704_gaochen"
 )
 
-RESULT_DIR="results/benchmark_ambient_4M_dynamic_hexplane_custom_small_scale"
+RESULT_DIR="results/benchmark_ambient_1M_dynamic_hexplane_custom_small_scale"
 RENDER_TRAJ_PATH="interp"
 DATA_FACTOR=2
-CAP_MAX=4000000
+CAP_MAX=1000000
 
 for SCENE in "${SCENE_LIST[@]}";
 do

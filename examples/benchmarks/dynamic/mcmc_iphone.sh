@@ -2,11 +2,23 @@ SCENE_DIR="data/iphone"
 SCENE_LIST=(
     "apple"
     "backpack"
+    "block"
+    "creeper"
+    "handwavy"
+    "haru-sit"
+    "mochi-high-five"
+    "paper-windmill"
+    "pillow"
+    "space-out"
+    "spin"
+    "sriracha-tree"
+    "teddy"
+    "wheel"
 )
 
 RESULT_DIR="results/benchmark_iphone_1M_dynamic"
 RENDER_TRAJ_PATH="interp"
-DATA_FACTOR=2
+DATA_FACTOR=1
 CAP_MAX=1000000
 
 for SCENE in "${SCENE_LIST[@]}";
@@ -16,6 +28,8 @@ do
     CUDA_VISIBLE_DEVICES=0 python simple_trainer.py mcmc --disable_viewer --data_factor $DATA_FACTOR \
         --strategy.cap-max $CAP_MAX \
         --deformation_opt \
+        --data_type dycheck \
+        --init_type random \
         --render_traj_path $RENDER_TRAJ_PATH \
         --data_dir $SCENE_DIR/$SCENE/ \
         --result_dir $RESULT_DIR/$SCENE/

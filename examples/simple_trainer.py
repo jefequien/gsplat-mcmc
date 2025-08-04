@@ -54,8 +54,10 @@ class Config:
     # Render trajectory path
     render_traj_path: str = "interp"
 
-    # Path to the Mip-NeRF 360 dataset
+    # Path to the dataset
     data_dir: str = "data/360_v2/garden"
+    # Type of the dataset (e.g. COLMAP or Blender)
+    data_type: Literal["colmap", "blender", "dycheck"] = "colmap"
     # Downsample factor for the dataset
     data_factor: int = 4
     # Directory to save results
@@ -82,9 +84,9 @@ class Config:
     # Number of training steps
     max_steps: int = 30_000
     # Steps to evaluate the model
-    eval_steps: List[int] = field(default_factory=lambda: [7_000, 15_000, 30_000])
+    eval_steps: List[int] = field(default_factory=lambda: [7_000, 30_000])
     # Steps to save the model
-    save_steps: List[int] = field(default_factory=lambda: [7_000, 15_000, 30_000])
+    save_steps: List[int] = field(default_factory=lambda: [7_000, 30_000])
     # Whether to save ply file (storage size can be large)
     save_ply: bool = False
     # Steps to save the model as ply
@@ -226,7 +228,7 @@ class Config:
 
 
 def create_splats_with_optimizers(
-    parser: Parser,
+    parser: Optional[Parser],
     init_type: str = "sfm",
     init_num_pts: int = 100_000,
     init_extent: float = 3.0,
@@ -368,23 +370,40 @@ class Runner:
 
         # Tensorboard
         self.writer = SummaryWriter(log_dir=f"{cfg.result_dir}/tb")
+        if cfg.data_type == "colmap":
+            from datasets.colmap import Dataset
 
-        # Load data: Training data should contain initial points and colors.
-        self.parser = Parser(
-            data_dir=cfg.data_dir,
-            factor=cfg.data_factor,
-            normalize=cfg.normalize_world_space,
-            test_every=cfg.test_every,
-        )
-        self.trainset = Dataset(
-            self.parser,
-            split="train",
-            patch_size=cfg.patch_size,
-            load_depths=cfg.depth_loss,
-        )
-        self.valset = Dataset(self.parser, split="val")
-        self.scene_scale = self.parser.scene_scale * 1.1 * cfg.global_scale
-        print("Scene scale:", self.scene_scale)
+            # Load data: Training data should contain initial points and colors.
+            self.parser = Parser(
+                data_dir=cfg.data_dir,
+                factor=cfg.data_factor,
+                normalize=cfg.normalize_world_space,
+                test_every=cfg.test_every,
+            )
+            self.trainset = Dataset(
+                self.parser,
+                split="train",
+                patch_size=cfg.patch_size,
+                load_depths=cfg.depth_loss,
+            )
+            self.valset = Dataset(self.parser, split="val")
+            self.scene_scale = self.parser.scene_scale * 1.1 * cfg.global_scale
+            print("Scene scale:", self.scene_scale)
+        elif cfg.data_type == "blender":
+            from datasets.blender import BlenderDataset
+
+            self.parser = None
+            self.trainset = BlenderDataset(cfg.data_dir, split="train")
+            # using `test` over `val` for evaluation - following same convention as in https://nerfbaselines.github.io/
+            self.valset = BlenderDataset(cfg.data_dir, split="test")
+            self.scene_scale = self.trainset.scene_scale * 1.1 * cfg.global_scale
+        elif cfg.data_type == "dycheck":
+            from datasets.dycheck import DycheckDataset, DycheckParser
+
+            self.parser = DycheckParser(cfg.data_dir, factor=cfg.data_factor)
+            self.trainset = DycheckDataset(self.parser, split="train")
+            self.valset = DycheckDataset(self.parser, split="val")
+            self.scene_scale = self.parser.scene_scale * 1.1 * cfg.global_scale
 
         # Model
         feature_dim = 32 if cfg.app_opt else None
@@ -1253,6 +1272,7 @@ class Runner:
         K = camera_state.get_K((width, height))
         c2w = torch.from_numpy(c2w).float().to(self.device)
         K = torch.from_numpy(K).float().to(self.device)
+        image_time = 0.5 * torch.ones((1,)).float().to(self.device)
 
         RENDER_MODE_MAP = {
             "rgb": "RGB",
@@ -1276,6 +1296,7 @@ class Runner:
             render_mode=RENDER_MODE_MAP[render_tab_state.render_mode],
             rasterize_mode=render_tab_state.rasterize_mode,
             camera_model=render_tab_state.camera_model,
+            image_times=image_time[None],
         )  # [1, H, W, 3]
         render_tab_state.total_gs_count = len(self.splats["means"])
         render_tab_state.rendered_gs_count = (info["radii"] > 0).all(-1).sum().item()
