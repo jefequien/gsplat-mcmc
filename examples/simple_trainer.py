@@ -84,9 +84,9 @@ class Config:
     # Number of training steps
     max_steps: int = 30_000
     # Steps to evaluate the model
-    eval_steps: List[int] = field(default_factory=lambda: [7_000, 30_000])
+    eval_steps: List[int] = field(default_factory=lambda: [7_000, 15_000, 30_000])
     # Steps to save the model
-    save_steps: List[int] = field(default_factory=lambda: [7_000, 30_000])
+    save_steps: List[int] = field(default_factory=lambda: [7_000, 15_000, 30_000])
     # Whether to save ply file (storage size can be large)
     save_ply: bool = False
     # Steps to save the model as ply
@@ -238,13 +238,13 @@ def create_splats_with_optimizers(
     scales_lr: float = 5e-3,
     opacities_lr: float = 5e-2,
     quats_lr: float = 1e-3,
-    # times_lr: float = 5e-3,
-    # durations_lr: float = 5e-3,
-    # velocities_lr: float = 2e-4,
+    times_lr: float = 5e-3,
+    durations_lr: float = 5e-2,
+    velocities_lr: float = 1e-3,
     # accelerations_lr: float = 1e-4,
+    # features_lr: float = 2.5e-3,
     sh0_lr: float = 2.5e-3,
     shN_lr: float = 2.5e-3 / 20,
-    # features_lr: float = 2.5e-3,
     scene_scale: float = 1.0,
     sh_degree: int = 3,
     sparse_grad: bool = False,
@@ -277,8 +277,9 @@ def create_splats_with_optimizers(
     N = points.shape[0]
     quats = torch.rand((N, 4))  # [N, 4]
     opacities = torch.logit(torch.full((N,), init_opacity))  # [N,]
-    # times = torch.rand((N,)) * 2.0 - 1.0
-    # durations = torch.logit(torch.full((N,), 0.01))
+    times = torch.rand((N,))
+    durations = torch.logit(torch.full((N,), 0.001))
+    # durations = torch.logit(torch.full((N,), 0.1))
     # velocities = torch.zeros((N, 3))
     # accelerations = torch.zeros((N, 3))
     # features = torch.zeros(N, 8)  # [N, feature_dim]
@@ -289,11 +290,11 @@ def create_splats_with_optimizers(
         ("scales", torch.nn.Parameter(scales), scales_lr),
         ("quats", torch.nn.Parameter(quats), quats_lr),
         ("opacities", torch.nn.Parameter(opacities), opacities_lr),
-        # ("features", torch.nn.Parameter(features), features_lr),
-        # ("times", torch.nn.Parameter(times), times_lr),
-        # ("durations", torch.nn.Parameter(durations), durations_lr),
+        ("times", torch.nn.Parameter(times), times_lr),
+        ("durations", torch.nn.Parameter(durations), durations_lr),
         # ("velocities", torch.nn.Parameter(velocities), velocities_lr),
         # ("accelerations", torch.nn.Parameter(accelerations), accelerations_lr),
+        # ("features", torch.nn.Parameter(features), features_lr),
     ]
 
     if feature_dim is None:
@@ -495,6 +496,8 @@ class Runner:
             if world_size > 1:
                 self.app_module = DDP(self.app_module)
                 self.blur_optimizers = []
+
+        self.deformation_optimizers = []
         if cfg.deformation_opt:
             self.deformation_module = DeformationOptModule(len(self.trainset)).to(self.device)
             self.deformation_optimizers = [
@@ -567,24 +570,24 @@ class Runner:
         # rasterization does normalization internally
         quats = self.splats["quats"]  # [N, 4]
         scales = torch.exp(self.splats["scales"])  # [N, 3]
-        opacities = torch.sigmoid(self.splats["opacities"])  # [N,]
+        # opacities = torch.sigmoid(self.splats["opacities"])  # [N,]
 
-        # times = torch.sigmoid(self.splats["times"])
-        # delta_times = (render_times - times)[:, None]
-        # durations = 10.0 * torch.sigmoid(self.splats["durations"])
-        # means = self.splats["means"] + self.splats["velocities"] * delta_times + 0.5 * self.splats["accelerations"] * delta_times ** 2
-        # opacities = torch.sigmoid(self.splats["opacities"]) * torch.exp(-0.5 * ((render_times - times) / durations) ** 2)
+        times = torch.sigmoid(self.splats["times"])
+        delta_times = (image_times - times)[:, None]
+        durations = 10.0 * torch.sigmoid(self.splats["durations"])
+        # print(durations.min(), durations.mean(), durations.max())
+        # means = self.splats["means"] + self.splats["velocities"] * delta_times + 0.5# * self.splats["accelerations"] * delta_times ** 2
+        opacities = torch.sigmoid(self.splats["opacities"]) * torch.exp(-0.5 * ((image_times - times) / durations) ** 2)
 
-        # if not torch.allclose(render_times, image_times):
-        #     print("Using deformation module")
-        means, quats = self.deformation_module(
-            means=means, 
-            quats=quats, 
-            # sh0=self.splats["sh0"], 
-            # features=self.splats["features"],
-            # render_times=render_times,
-            image_times=image_times, 
-        )
+        if cfg.deformation_opt:
+            means, quats = self.deformation_module(
+                means=means, 
+                quats=quats, 
+                # sh0=self.splats["sh0"], 
+                # features=self.splats["features"],
+                # render_times=render_times,
+                image_times=image_times, 
+            )
 
         image_ids = kwargs.pop("image_ids", None)
         if self.cfg.app_opt:
@@ -819,7 +822,8 @@ class Runner:
                 loss += cfg.scale_reg * torch.exp(self.splats["scales"]).mean()
             # loss += 0.1 * torch.linalg.norm(self.splats["velocities"], dim=-1).mean()
             # Encourage durations to be as long as possible
-            # loss += 0.01 * (1.0 - torch.sigmoid(self.splats["durations"]).mean())
+            # if step > 3000:
+            #     loss += 0.001 * (1.0 - torch.sigmoid(self.splats["durations"]).mean())
             # loss += 0.01 * torch.abs(self.splats["features"]).mean()
             # loss += self.deformation_module.alap_loss()
             loss.backward()

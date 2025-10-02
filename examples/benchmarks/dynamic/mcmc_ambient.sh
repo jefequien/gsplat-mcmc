@@ -12,7 +12,7 @@ SCENE_LIST=(
     "dyntree_IMG_1704_gaochen"
 )
 
-RESULT_DIR="results/benchmark_ambient_1M_dynamic_hexplane_custom_small_scale"
+RESULT_DIR="results/benchmark_ambient_1M_dynamic"
 RENDER_TRAJ_PATH="interp"
 DATA_FACTOR=2
 CAP_MAX=1000000
@@ -23,7 +23,9 @@ do
 
     CUDA_VISIBLE_DEVICES=0 python simple_trainer.py mcmc --disable_viewer --data_factor $DATA_FACTOR \
         --strategy.cap-max $CAP_MAX \
+        --init_type random \
         --deformation_opt \
+        --sh_degree 0 \
         --render_traj_path $RENDER_TRAJ_PATH \
         --data_dir $SCENE_DIR/$SCENE/ \
         --result_dir $RESULT_DIR/$SCENE/

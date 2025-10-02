@@ -37,7 +37,7 @@ class DycheckParser:
             for i, p in enumerate(self.all_image_paths)
         }
 
-        # Load all camera poses (OpenCV convention, scale positions by 30.0)
+        # Load all camera poses (OpenCV convention, scale positions by 10.0)
         self.camtoworlds = self._load_all_camtoworlds()
 
         # Compute scene scale (max distance from center)
@@ -78,7 +78,7 @@ class DycheckParser:
             with open(cam_path, "r") as f:
                 cam = json.load(f)
             R = np.array(cam["orientation"]).T  # OpenCV camera-to-world
-            t = np.array(cam["position"]) * 30.0
+            t = np.array(cam["position"]) * 10.0
             c2w = np.eye(4, dtype=np.float32)
             c2w[:3, :3] = R
             c2w[:3, 3] = t
@@ -119,7 +119,7 @@ class DycheckParser:
 
     def load_pose(self, cam):
         R = np.array(cam["orientation"]).T
-        t = np.array(cam["position"]) * 30.0
+        t = np.array(cam["position"]) * 10.0
         c2w = np.eye(4, dtype=np.float32)
         c2w[:3, :3] = R
         c2w[:3, 3] = t
