@@ -1028,11 +1028,9 @@ class Runner:
             camtoworlds = self.trainset.cam_to_worlds[5:-5]
             Ks_values = [self.trainset.intrinsics]
             imsize_values = [(self.trainset.image_width, self.trainset.image_height)]
-        
+
         if cfg.render_traj_path == "interp":
-            camtoworlds_traj = generate_interpolated_path(
-                camtoworlds, 1
-            )  # [N, 3, 4]
+            camtoworlds_traj = generate_interpolated_path(camtoworlds, 1)  # [N, 3, 4]
         elif cfg.render_traj_path == "ellipse":
             height = camtoworlds[:, 2, 3].mean()
             camtoworlds_traj = generate_ellipse_path_z(
