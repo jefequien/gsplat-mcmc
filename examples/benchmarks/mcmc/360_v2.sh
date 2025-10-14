@@ -17,6 +17,7 @@ do
     fi
 
     CUDA_VISIBLE_DEVICES=0 python simple_trainer.py mcmc \
+        --strategy.cap-max $CAP_MAX \
         --disable_viewer \
         --data_factor $DATA_FACTOR \
         --render_traj_path $RENDER_TRAJ_PATH \

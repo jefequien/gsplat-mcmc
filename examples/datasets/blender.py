@@ -25,11 +25,14 @@ class BlenderDataset:
         image_ids = []
         cam_to_worlds = []
         images = []
+        masks = []
         for frame in transforms["frames"]:
             image_id = frame["file_path"].replace("./", "")
             image_ids.append(image_id)
             file_path = self.data_dir / f"{image_id}.png"
-            images.append(imageio.imread(file_path)[..., :3])
+            image = imageio.imread(file_path)
+            images.append(image[..., :3])
+            masks.append(image[..., 3])
 
             c2w = np.array(frame["transform_matrix"])
             # Convert from OpenGL to OpenCV coordinate system
@@ -39,6 +42,7 @@ class BlenderDataset:
         self.image_ids = image_ids
         self.cam_to_worlds = np.array(cam_to_worlds)
         self.images = images
+        self.masks = masks
 
         # all renders have the same intrinsics
         # see also
@@ -68,5 +72,6 @@ class BlenderDataset:
             camtoworld=torch.from_numpy(self.cam_to_worlds[item]).float(),
             image=torch.from_numpy(self.images[item]).float(),
             image_id=item,
+            mask=torch.from_numpy(self.masks[item]).bool(),
         )
         return data
