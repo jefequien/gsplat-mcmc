@@ -1,12 +1,21 @@
 SCENE_DIR="data/360_v2"
 RESULT_DIR="results/benchmark_mcmc_360_v2"
-# SCENE_LIST="garden bicycle stump bonsai counter kitchen room treehill flowers"
-SCENE_LIST="stump bonsai counter kitchen room treehill flowers"
-RENDER_TRAJ_PATH="ellipse"
+SCENE_LIST=(
+    "garden"
+    "bicycle"
+    "stump"
+    "bonsai"
+    "counter"
+    "kitchen"
+    "room"
+    "treehill"
+    "flowers"
+)
 
+RENDER_TRAJ_PATH="ellipse"
 CAP_MAX=1000000
 
-for SCENE in $SCENE_LIST;
+for SCENE in "${SCENE_LIST[@]}";
 do
     echo "Running $SCENE"
 
