@@ -51,8 +51,10 @@ class Config:
     # Render trajectory path
     render_traj_path: str = "interp"
 
-    # Path to the Mip-NeRF 360 dataset
+    # Path to the dataset
     data_dir: str = "data/360_v2/garden"
+    # Type of the dataset (e.g. COLMAP or Blender)
+    data_type: Literal["colmap", "blender"] = "colmap"
     # Downsample factor for the dataset
     data_factor: int = 4
     # Directory to save results
@@ -209,7 +211,7 @@ class Config:
 
 
 def create_splats_with_optimizers(
-    parser: Parser,
+    parser: Optional[Parser],
     init_type: str = "sfm",
     init_num_pts: int = 100_000,
     init_extent: float = 3.0,
@@ -329,23 +331,33 @@ class Runner:
 
         # Tensorboard
         self.writer = SummaryWriter(log_dir=f"{cfg.result_dir}/tb")
+        if cfg.data_type == "colmap":
+            from datasets.colmap import Dataset
 
-        # Load data: Training data should contain initial points and colors.
-        self.parser = Parser(
-            data_dir=cfg.data_dir,
-            factor=cfg.data_factor,
-            normalize=cfg.normalize_world_space,
-            test_every=cfg.test_every,
-        )
-        self.trainset = Dataset(
-            self.parser,
-            split="train",
-            patch_size=cfg.patch_size,
-            load_depths=cfg.depth_loss,
-        )
-        self.valset = Dataset(self.parser, split="val")
-        self.scene_scale = self.parser.scene_scale * 1.1 * cfg.global_scale
-        print("Scene scale:", self.scene_scale)
+            # Load data: Training data should contain initial points and colors.
+            self.parser = Parser(
+                data_dir=cfg.data_dir,
+                factor=cfg.data_factor,
+                normalize=cfg.normalize_world_space,
+                test_every=cfg.test_every,
+            )
+            self.trainset = Dataset(
+                self.parser,
+                split="train",
+                patch_size=cfg.patch_size,
+                load_depths=cfg.depth_loss,
+            )
+            self.valset = Dataset(self.parser, split="val")
+            self.scene_scale = self.parser.scene_scale * 1.1 * cfg.global_scale
+            print("Scene scale:", self.scene_scale)
+        elif cfg.data_type == "blender":
+            from datasets.blender import BlenderDataset
+
+            self.parser = None
+            self.trainset = BlenderDataset(cfg.data_dir, split="train")
+            # using `test` over `val` for evaluation - following same convention as in https://nerfbaselines.github.io/
+            self.valset = BlenderDataset(cfg.data_dir, split="test")
+            self.scene_scale = self.trainset.scene_scale * 1.1 * cfg.global_scale
 
         # Model
         feature_dim = 32 if cfg.app_opt else None
@@ -882,7 +894,8 @@ class Runner:
 
             # eval the full set
             if step in [i - 1 for i in cfg.eval_steps]:
-                self.eval(step)
+                self.eval(step=step, stage="train")
+                self.eval(step=step, stage="val")
                 self.render_traj(step)
 
             # run compression
@@ -911,12 +924,17 @@ class Runner:
         world_rank = self.world_rank
         world_size = self.world_size
 
-        valloader = torch.utils.data.DataLoader(
-            self.valset, batch_size=1, shuffle=False, num_workers=1
-        )
+        if stage == "train":
+            dataloader = torch.utils.data.DataLoader(
+                self.trainset, batch_size=1, shuffle=False, num_workers=1
+            )
+        else:
+            dataloader = torch.utils.data.DataLoader(
+                self.valset, batch_size=1, shuffle=False, num_workers=1
+            )
         ellipse_time = 0
         metrics = defaultdict(list)
-        for i, data in enumerate(valloader):
+        for i, data in enumerate(dataloader):
             camtoworlds = data["camtoworld"].to(device)
             Ks = data["K"].to(device)
             pixels = data["image"].to(device) / 255.0
@@ -963,7 +981,7 @@ class Runner:
                     metrics["cc_lpips"].append(self.lpips(cc_colors_p, pixels_p))
 
         if world_rank == 0:
-            ellipse_time /= len(valloader)
+            ellipse_time /= len(dataloader)
 
             stats = {k: torch.stack(v).mean().item() for k, v in metrics.items()}
             stats.update(
@@ -1002,19 +1020,27 @@ class Runner:
         cfg = self.cfg
         device = self.device
 
-        camtoworlds_all = self.parser.camtoworlds[5:-5]
+        if self.parser is not None:
+            camtoworlds = self.parser.camtoworlds[5:-5]
+            Ks_values = self.parser.Ks_dict.values()
+            imsize_values = self.parser.imsize_dict.values()
+        else:
+            camtoworlds = self.trainset.cam_to_worlds[5:-5]
+            Ks_values = [self.trainset.intrinsics]
+            imsize_values = [(self.trainset.image_width, self.trainset.image_height)]
+        
         if cfg.render_traj_path == "interp":
-            camtoworlds_all = generate_interpolated_path(
-                camtoworlds_all, 1
+            camtoworlds_traj = generate_interpolated_path(
+                camtoworlds, 1
             )  # [N, 3, 4]
         elif cfg.render_traj_path == "ellipse":
-            height = camtoworlds_all[:, 2, 3].mean()
-            camtoworlds_all = generate_ellipse_path_z(
-                camtoworlds_all, height=height
+            height = camtoworlds[:, 2, 3].mean()
+            camtoworlds_traj = generate_ellipse_path_z(
+                camtoworlds, height=height
             )  # [N, 3, 4]
         elif cfg.render_traj_path == "spiral":
-            camtoworlds_all = generate_spiral_path(
-                camtoworlds_all,
+            camtoworlds_traj = generate_spiral_path(
+                camtoworlds,
                 bounds=self.parser.bounds * self.scene_scale,
                 spiral_scale_r=self.parser.extconf["spiral_radius_scale"],
             )
@@ -1023,26 +1049,26 @@ class Runner:
                 f"Render trajectory type not supported: {cfg.render_traj_path}"
             )
 
-        camtoworlds_all = np.concatenate(
+        camtoworlds_traj = np.concatenate(
             [
-                camtoworlds_all,
+                camtoworlds_traj,
                 np.repeat(
-                    np.array([[[0.0, 0.0, 0.0, 1.0]]]), len(camtoworlds_all), axis=0
+                    np.array([[[0.0, 0.0, 0.0, 1.0]]]), len(camtoworlds_traj), axis=0
                 ),
             ],
             axis=1,
         )  # [N, 4, 4]
 
-        camtoworlds_all = torch.from_numpy(camtoworlds_all).float().to(device)
-        K = torch.from_numpy(list(self.parser.Ks_dict.values())[0]).float().to(device)
-        width, height = list(self.parser.imsize_dict.values())[0]
+        camtoworlds_traj = torch.from_numpy(camtoworlds_traj).float().to(device)
+        K = torch.from_numpy(list(Ks_values)[0]).float().to(device)
+        width, height = list(imsize_values)[0]
 
         # save to video
         video_dir = f"{cfg.result_dir}/videos"
         os.makedirs(video_dir, exist_ok=True)
         writer = imageio.get_writer(f"{video_dir}/traj_{step}.mp4", fps=30)
-        for i in tqdm.trange(len(camtoworlds_all), desc="Rendering trajectory"):
-            camtoworlds = camtoworlds_all[i : i + 1]
+        for i in tqdm.trange(len(camtoworlds_traj), desc="Rendering trajectory"):
+            camtoworlds = camtoworlds_traj[i : i + 1]
             Ks = K[None]
 
             renders, _, _ = self.rasterize_splats(
