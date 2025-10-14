@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-import json
 from pathlib import Path
 from typing import Any, Dict, Literal
 
@@ -16,6 +15,8 @@ class DL3DVDataset:
     """The path to the scene"""
     split: Literal["train", "test", "val"] = "train"
     """Which split to use."""
+    test_every: int = 8
+    """Every N images there is a test image."""
 
     def __post_init__(self):
         self.data_dir = Path(self.data_dir)
@@ -52,14 +53,21 @@ class DL3DVDataset:
         dists = np.linalg.norm(camera_locations - scene_center, axis=1)
         self.scene_scale = np.max(dists)
 
+        # Split indices
+        self.indices = np.arange(len(self.images))
+        if self.split == "train":
+            self.indices = self.indices[self.indices % self.test_every != 0]
+        else:
+            self.indices = self.indices[self.indices % self.test_every == 0]
+
     def __len__(self):
         return len(self.images)
 
     def __getitem__(self, item: int) -> Dict[str, Any]:
         data = dict(
             K=torch.from_numpy(self.intrinsics).float(),
-            camtoworld=torch.from_numpy(self.cam_to_worlds[item]).float(),
-            image=torch.from_numpy(self.images[item]).float(),
+            camtoworld=torch.from_numpy(self.cam_to_worlds[self.indices[item]]).float(),
+            image=torch.from_numpy(self.images[self.indices[item]]).float(),
             image_id=item,
         )
         return data

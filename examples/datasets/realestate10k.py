@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-import json
 from pathlib import Path
 from typing import Any, Dict, Literal
 
@@ -16,6 +15,8 @@ class Realestate10kDataset:
     """The path to the scene, consisting of renders and transforms.json"""
     split: Literal["train", "test", "val"] = "train"
     """Which split to use."""
+    test_every: int = 8
+    """Every N images there is a test image."""
 
     def __post_init__(self):
         self.data_dir = Path(self.data_dir)
@@ -31,7 +32,7 @@ class Realestate10kDataset:
         self.image_height, self.image_width = self.images.shape[1:3]
 
         training_poses = torch.load(self.data_dir.parent / "training_poses" / f"{self.scene_name}.pt").numpy()
-        # fx = training_poses[0, 0] * self.image_width # Bad due to cropping
+        # Use fy due to cropping
         fy = training_poses[0, 1] * self.image_height
         cx = training_poses[0, 2] * self.image_width
         cy = training_poses[0, 3] * self.image_height
@@ -47,6 +48,7 @@ class Realestate10kDataset:
             axis=1,
         )  # [N, 4, 4]
         self.cam_to_worlds = np.array([np.linalg.inv(p) for p in self.cam_to_worlds])
+        self.cam_to_worlds[:,:3,3] *= 10
 
         # compute scene scale (as is done in the colmap parser)
         camera_locations = np.stack(self.cam_to_worlds, axis=0)[:, :3, 3]
@@ -54,14 +56,21 @@ class Realestate10kDataset:
         dists = np.linalg.norm(camera_locations - scene_center, axis=1)
         self.scene_scale = np.max(dists)
 
+        # Split indices
+        self.indices = np.arange(len(self.images))
+        if self.split == "train":
+            self.indices = self.indices[self.indices % self.test_every != 0]
+        else:
+            self.indices = self.indices[self.indices % self.test_every == 0]
+
     def __len__(self):
-        return len(self.images)
+        return len(self.indices)
 
     def __getitem__(self, item: int) -> Dict[str, Any]:
         data = dict(
             K=torch.from_numpy(self.intrinsics).float(),
-            camtoworld=torch.from_numpy(self.cam_to_worlds[item]).float(),
-            image=torch.from_numpy(self.images[item]).float(),
+            camtoworld=torch.from_numpy(self.cam_to_worlds[self.indices[item]]).float(),
+            image=torch.from_numpy(self.images[self.indices[item]]).float(),
             image_id=item,
         )
         return data
