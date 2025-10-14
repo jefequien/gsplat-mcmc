@@ -333,6 +333,7 @@ class Runner:
         self.writer = SummaryWriter(log_dir=f"{cfg.result_dir}/tb")
         if cfg.data_type == "colmap":
             from datasets.colmap import Dataset
+
             # Load data: Training data should contain initial points and colors.
             self.parser = Parser(
                 data_dir=cfg.data_dir,
@@ -351,6 +352,7 @@ class Runner:
             print("Scene scale:", self.scene_scale)
         elif cfg.data_type == "blender":
             from datasets.blender import BlenderDataset
+
             self.parser = None
             self.trainset = BlenderDataset(cfg.data_dir, split="train")
             # using `test` over `val` for evaluation - following same convention as in https://nerfbaselines.github.io/
@@ -358,12 +360,14 @@ class Runner:
             self.scene_scale = self.trainset.scene_scale * 1.1 * cfg.global_scale
         elif cfg.data_type == "realestate10k":
             from datasets.realestate10k import Realestate10kDataset
+
             self.parser = None
             self.trainset = Realestate10kDataset(cfg.data_dir, split="train")
             self.valset = Realestate10kDataset(cfg.data_dir, split="val")
             self.scene_scale = self.trainset.scene_scale * 1.1 * cfg.global_scale
         elif cfg.data_type == "dl3dv":
             from datasets.dl3dv import DL3DVDataset
+
             self.parser = None
             self.trainset = DL3DVDataset(cfg.data_dir, split="train")
             self.valset = DL3DVDataset(cfg.data_dir, split="val")

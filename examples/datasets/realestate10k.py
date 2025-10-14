@@ -13,7 +13,7 @@ class Realestate10kDataset:
 
     data_dir: str
     """The path to the scene, consisting of renders and transforms.json"""
-    split: Literal["train", "test", "val"] = "train"
+    split: Literal["train", "val"] = "train"
     """Which split to use."""
     test_every: int = 8
     """Every N images there is a test image."""
@@ -21,8 +21,10 @@ class Realestate10kDataset:
     def __post_init__(self):
         self.data_dir = Path(self.data_dir)
         self.scene_name = self.data_dir.name
-        
-        self.video_path = self.data_dir.parent / "training_256" / f"{self.scene_name}.mp4"
+
+        self.video_path = (
+            self.data_dir.parent / "training_256" / f"{self.scene_name}.mp4"
+        )
         reader = imageio.get_reader(self.video_path)
         frames = []
         for frame in reader:
@@ -31,7 +33,9 @@ class Realestate10kDataset:
         self.images = np.stack(frames, axis=0)
         self.image_height, self.image_width = self.images.shape[1:3]
 
-        training_poses = torch.load(self.data_dir.parent / "training_poses" / f"{self.scene_name}.pt").numpy()
+        training_poses = torch.load(
+            self.data_dir.parent / "training_poses" / f"{self.scene_name}.pt"
+        ).numpy()
         # Use fy due to cropping
         fy = training_poses[0, 1] * self.image_height
         cx = training_poses[0, 2] * self.image_width
@@ -48,7 +52,7 @@ class Realestate10kDataset:
             axis=1,
         )  # [N, 4, 4]
         self.cam_to_worlds = np.array([np.linalg.inv(p) for p in self.cam_to_worlds])
-        self.cam_to_worlds[:,:3,3] *= 10
+        self.cam_to_worlds[:, :3, 3] *= 10
 
         # compute scene scale (as is done in the colmap parser)
         camera_locations = np.stack(self.cam_to_worlds, axis=0)[:, :3, 3]

@@ -1,12 +1,16 @@
 SCENE_DIR="data/dl3dv"
 RESULT_DIR="results/benchmark_mcmc_dl3dv"
-SCENE_LIST="0a1b7c20a92c43c6b8954b1ac909fb2f0fa8b2997b80604bc8bbec80a1cb2da3"
-RENDER_TRAJ_PATH="ellipse"
+SCENE_LIST=(
+    "0a1b7c20a92c43c6b8954b1ac909fb2f0fa8b2997b80604bc8bbec80a1cb2da3"
+    "0a6c01ac3212768772f8f6eca86314c72d5ca320c3e3def148ddaceab23c07f4"
+    "0a45aa466f114e6daa13a82775e7bd5fc295e37a1e3d61deb3741a7e7a1b1f8a"
+)
 
+RENDER_TRAJ_PATH="ellipse"
 CAP_MAX=1000000
 DATA_FACTOR=1
 
-for SCENE in $SCENE_LIST;
+for SCENE in "${SCENE_LIST[@]}";
 do
     echo "Running $SCENE"
 

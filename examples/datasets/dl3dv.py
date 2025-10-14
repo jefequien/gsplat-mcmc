@@ -13,7 +13,7 @@ class DL3DVDataset:
 
     data_dir: str
     """The path to the scene"""
-    split: Literal["train", "test", "val"] = "train"
+    split: Literal["train", "val"] = "train"
     """Which split to use."""
     test_every: int = 8
     """Every N images there is a test image."""
@@ -22,8 +22,15 @@ class DL3DVDataset:
         self.data_dir = Path(self.data_dir)
         self.root_dir = self.data_dir.parent
         self.scene_name = self.data_dir.name
-        
-        self.rgb_dir = self.root_dir / "processed_dl3dv_ours" / "1K" / self.scene_name / "dense" / "rgb"
+
+        self.rgb_dir = (
+            self.root_dir
+            / "processed_dl3dv_ours"
+            / "1K"
+            / self.scene_name
+            / "dense"
+            / "rgb"
+        )
         image_paths = sorted(
             [
                 p
@@ -35,13 +42,16 @@ class DL3DVDataset:
         self.images = np.stack(frames, axis=0)
         self.image_height, self.image_width = self.images.shape[1:3]
 
-        self.cam_dir = self.root_dir / "processed_dl3dv_ours" / "1K" / self.scene_name / "dense" / "cam"
+        self.cam_dir = (
+            self.root_dir
+            / "processed_dl3dv_ours"
+            / "1K"
+            / self.scene_name
+            / "dense"
+            / "cam"
+        )
         cam_paths = sorted(
-            [
-                p
-                for p in self.cam_dir.rglob("*")
-                if p.suffix.lower() in {".npz"}
-            ]
+            [p for p in self.cam_dir.rglob("*") if p.suffix.lower() in {".npz"}]
         )
         cam_params = [np.load(str(p)) for p in cam_paths]
         self.intrinsics = cam_params[0]["intrinsic"]
@@ -61,7 +71,7 @@ class DL3DVDataset:
             self.indices = self.indices[self.indices % self.test_every == 0]
 
     def __len__(self):
-        return len(self.images)
+        return len(self.indices)
 
     def __getitem__(self, item: int) -> Dict[str, Any]:
         data = dict(
