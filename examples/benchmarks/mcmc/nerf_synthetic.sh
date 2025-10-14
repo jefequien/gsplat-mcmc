@@ -1,12 +1,21 @@
 SCENE_DIR="data/nerf_synthetic"
 RESULT_DIR="results/benchmark_mcmc_nerf_synthetic"
-SCENE_LIST="chair drums ficus hotdog lego materials mic ship"
-RENDER_TRAJ_PATH="ellipse"
+SCENE_LIST=(
+    "chair"
+    "drums"
+    "ficus"
+    "hotdog"
+    "lego"
+    "materials"
+    "mic"
+    "ship"
+)
 
+RENDER_TRAJ_PATH="ellipse"
 CAP_MAX=250000
 DATA_FACTOR=1
 
-for SCENE in $SCENE_LIST;
+for SCENE in "${SCENE_LIST[@]}";
 do
     echo "Running $SCENE"
 
