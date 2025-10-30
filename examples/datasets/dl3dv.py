@@ -21,12 +21,12 @@ class DL3DVDataset:
     def __post_init__(self):
         self.data_dir = Path(self.data_dir)
         self.root_dir = self.data_dir.parent
-        self.scene_name = self.data_dir.name
+        self.scene_folder, self.scene_name = self.data_dir.name.split("-")
 
         self.rgb_dir = (
             self.root_dir
             / "processed_dl3dv_ours"
-            / "1K"
+            / self.scene_folder
             / self.scene_name
             / "dense"
             / "rgb"
@@ -45,7 +45,7 @@ class DL3DVDataset:
         self.cam_dir = (
             self.root_dir
             / "processed_dl3dv_ours"
-            / "1K"
+            / self.scene_folder
             / self.scene_name
             / "dense"
             / "cam"
@@ -69,6 +69,15 @@ class DL3DVDataset:
             self.indices = self.indices[self.indices % self.test_every != 0]
         else:
             self.indices = self.indices[self.indices % self.test_every == 0]
+        
+        # start_indices = {
+        #     "2aadacbd3623dff25834e1f13cb6c1d6f91996e2957e8fd7de1ca7883e424393": 21,
+        #     "50208cdb39510fdf8dedbd57536a6869dc93027d77608983925c9d7955578882": 260,
+        #     "de3b622853799be8b8b5f2acd72c32f58e45b0b12f482c4b1f555a4602302424": 333,
+        #     "2799116f2a663fee45296028841c2f838e525246a5dcb67a2e6699b7f3deabed": 149,
+        #     "5dac8fa15625e54b1bd487b36701fb99c8ed909563b86ce3728caebfefde8dda": 276,
+        # }
+        # self.indices = np.arange(start_indices[self.scene_name], start_indices[self.scene_name] + 36, 5)
 
     def __len__(self):
         return len(self.indices)

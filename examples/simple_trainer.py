@@ -349,7 +349,6 @@ class Runner:
             )
             self.valset = Dataset(self.parser, split="val")
             self.scene_scale = self.parser.scene_scale * 1.1 * cfg.global_scale
-            print("Scene scale:", self.scene_scale)
         elif cfg.data_type == "blender":
             from datasets.blender import BlenderDataset
 
@@ -372,6 +371,7 @@ class Runner:
             self.trainset = DL3DVDataset(cfg.data_dir, split="train")
             self.valset = DL3DVDataset(cfg.data_dir, split="val")
             self.scene_scale = self.trainset.scene_scale * 1.1 * cfg.global_scale
+        print("Scene scale:", self.scene_scale)
 
         # Model
         feature_dim = 32 if cfg.app_opt else None
@@ -1039,7 +1039,7 @@ class Runner:
             Ks_values = self.parser.Ks_dict.values()
             imsize_values = self.parser.imsize_dict.values()
         else:
-            camtoworlds = self.trainset.cam_to_worlds[5:-5]
+            camtoworlds = self.trainset.cam_to_worlds
             Ks_values = [self.trainset.intrinsics]
             imsize_values = [(self.trainset.image_width, self.trainset.image_height)]
 

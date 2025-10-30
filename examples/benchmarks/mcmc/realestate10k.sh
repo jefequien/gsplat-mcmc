@@ -21,6 +21,7 @@ do
         --data_type realestate10k \
         --init_type random \
         --init_extent 10.0 \
+        --global_scale 10.0 \
         --render_traj_path $RENDER_TRAJ_PATH \
         --data_dir $SCENE_DIR/$SCENE/ \
         --result_dir $RESULT_DIR/$SCENE/

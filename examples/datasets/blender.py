@@ -20,6 +20,8 @@ class BlenderDataset:
     def __post_init__(self):
         self.data_dir = Path(self.data_dir)
         transforms_path = self.data_dir / f"transforms_{self.split}.json"
+        if not transforms_path.exists():
+            transforms_path = self.data_dir / f"transforms.json"
         with transforms_path.open("r") as transforms_handle:
             transforms = json.load(transforms_handle)
         image_ids = []
@@ -32,7 +34,8 @@ class BlenderDataset:
             file_path = self.data_dir / f"{image_id}.png"
             image = imageio.imread(file_path)
             images.append(image[..., :3])
-            masks.append(image[..., 3])
+            mask = image[..., 3] if image.shape[2] == 4 else None
+            masks.append(mask)
 
             c2w = np.array(frame["transform_matrix"])
             # Convert from OpenGL to OpenCV coordinate system
@@ -41,6 +44,8 @@ class BlenderDataset:
 
         self.image_ids = image_ids
         self.cam_to_worlds = np.array(cam_to_worlds)
+        # Blender scenes are small. Scale them by 10.0 to make them similar to COLMAP scenes.
+        self.cam_to_worlds[:,:3,3] *= 10.0
         self.images = images
         self.masks = masks
 
@@ -50,9 +55,14 @@ class BlenderDataset:
         image_height, image_width = self.images[0].shape[:2]
         cx = image_width / 2.0
         cy = image_height / 2.0
-        fl = 0.5 * image_width / np.tan(0.5 * transforms["camera_angle_x"])
+        if "camera_angle_x" in transforms:
+            fx = 0.5 * image_width / np.tan(0.5 * transforms["camera_angle_x"])
+            fy = fx
+        else:
+            fy = transforms["fl_y"]
+            fx = fy
         self.intrinsics = np.array(
-            [[fl, 0, cx], [0, fl, cy], [0, 0, 1]], dtype=np.float32
+            [[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=np.float32
         )
         self.image_height = image_height
         self.image_width = image_width
@@ -72,6 +82,7 @@ class BlenderDataset:
             camtoworld=torch.from_numpy(self.cam_to_worlds[item]).float(),
             image=torch.from_numpy(self.images[item]).float(),
             image_id=item,
-            mask=torch.from_numpy(self.masks[item]).bool(),
         )
+        if self.masks[item] is not None:
+            data["mask"] = torch.from_numpy(self.masks[item]).bool()
         return data

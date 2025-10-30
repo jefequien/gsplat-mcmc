@@ -1,13 +1,20 @@
-SCENE_DIR="data/dl3dv"
-RESULT_DIR="results/benchmark_mcmc_dl3dv"
+SCENE_DIR="data/dl3dv-frames256"
+RESULT_DIR="results/benchmark_mcmc_dl3dv-frames256"
 SCENE_LIST=(
-    "0a1b7c20a92c43c6b8954b1ac909fb2f0fa8b2997b80604bc8bbec80a1cb2da3"
-    "0a6c01ac3212768772f8f6eca86314c72d5ca320c3e3def148ddaceab23c07f4"
-    "0a45aa466f114e6daa13a82775e7bd5fc295e37a1e3d61deb3741a7e7a1b1f8a"
+    "2K/2aadacbd3623dff25834e1f13cb6c1d6f91996e2957e8fd7de1ca7883e424393"
+    "3K/5dac8fa15625e54b1bd487b36701fb99c8ed909563b86ce3728caebfefde8dda"
+    "3K/50208cdb39510fdf8dedbd57536a6869dc93027d77608983925c9d7955578882"
+    "5K/de3b622853799be8b8b5f2acd72c32f58e45b0b12f482c4b1f555a4602302424"
+    "5K/2799116f2a663fee45296028841c2f838e525246a5dcb67a2e6699b7f3deabed"
+    "8K/0a45d3a3470b042d8aa44340601b58d258ad123464c3ae8c2899882ab8cc5bfd"
+    "8K/41976b976a156d2744b3ff760ea1385b3d1dd53d002ecb1ac4b2953515d5c30e"
+    "9K/7f7e34027e51bd908dac27e0c4459180842031047b0f516f5a84ab5bc24c5f44"
+    "10K/970a5c674c27b504d592d0a70c496d0e35ab0dc76802fb6e1bf336a4c1fe150a"
+    "10K/98f8220e7d2a2addbacaf26d3b005764e0510ae730ac11182c6e4de15a7e02e4"
 )
 
-RENDER_TRAJ_PATH="ellipse"
-CAP_MAX=1000000
+RENDER_TRAJ_PATH="interp"
+CAP_MAX=250000
 DATA_FACTOR=1
 
 for SCENE in "${SCENE_LIST[@]}";
@@ -17,8 +24,9 @@ do
     CUDA_VISIBLE_DEVICES=0 python simple_trainer.py mcmc \
         --strategy.cap-max $CAP_MAX \
         --disable_viewer \
+        --max_steps 7000 \
         --data_factor $DATA_FACTOR \
-        --data_type dl3dv \
+        --data_type blender \
         --init_type random \
         --render_traj_path $RENDER_TRAJ_PATH \
         --data_dir $SCENE_DIR/$SCENE/ \

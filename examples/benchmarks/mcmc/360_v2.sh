@@ -1,15 +1,20 @@
-SCENE_DIR="data/360_v2"
-RESULT_DIR="results/benchmark_mcmc_360_v2"
+# SCENE_DIR="data/360_v2"
+# RESULT_DIR="results/benchmark_mcmc_360_v2"
+# SCENE_LIST=(
+#     "garden"
+#     "bicycle"
+#     "stump"
+#     "bonsai"
+#     "counter"
+#     "kitchen"
+#     "room"
+#     "treehill"
+#     "flowers"
+# )
+SCENE_DIR="data/refnerf"
+RESULT_DIR="results/benchmark_mcmc_refnerf"
 SCENE_LIST=(
-    "garden"
-    "bicycle"
-    "stump"
-    "bonsai"
-    "counter"
-    "kitchen"
-    "room"
-    "treehill"
-    "flowers"
+    "gardenspheres"
 )
 
 RENDER_TRAJ_PATH="ellipse"

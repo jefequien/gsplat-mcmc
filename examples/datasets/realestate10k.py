@@ -52,7 +52,6 @@ class Realestate10kDataset:
             axis=1,
         )  # [N, 4, 4]
         self.cam_to_worlds = np.array([np.linalg.inv(p) for p in self.cam_to_worlds])
-        self.cam_to_worlds[:, :3, 3] *= 10
 
         # compute scene scale (as is done in the colmap parser)
         camera_locations = np.stack(self.cam_to_worlds, axis=0)[:, :3, 3]
