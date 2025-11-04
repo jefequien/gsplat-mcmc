@@ -34,7 +34,8 @@ class BlenderDataset:
             file_path = self.data_dir / f"{image_id}.png"
             image = imageio.imread(file_path)
             images.append(image[..., :3])
-            mask = image[..., 3] if image.shape[2] == 4 else None
+            # mask = image[..., 3] if image.shape[2] == 4 else None
+            mask = None
             masks.append(mask)
 
             c2w = np.array(frame["transform_matrix"])

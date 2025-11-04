@@ -22,6 +22,7 @@ do
     CUDA_VISIBLE_DEVICES=0 python simple_trainer.py mcmc \
         --strategy.cap-max $CAP_MAX \
         --disable_viewer \
+        --max_steps 7000 \
         --data_factor $DATA_FACTOR \
         --data_type blender \
         --init_type random \
