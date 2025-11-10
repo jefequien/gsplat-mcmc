@@ -908,7 +908,7 @@ class Runner:
 
             # eval the full set
             if step in [i - 1 for i in cfg.eval_steps]:
-                self.eval(step=step, stage="train")
+                # self.eval(step=step, stage="train")
                 self.eval(step=step, stage="val")
                 self.render_traj(step)
 
