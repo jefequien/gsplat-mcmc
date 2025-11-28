@@ -11,18 +11,33 @@
 #     "9K/7f7e34027e51bd908dac27e0c4459180842031047b0f516f5a84ab5bc24c5f44"
 #     "10K/970a5c674c27b504d592d0a70c496d0e35ab0dc76802fb6e1bf336a4c1fe150a"
 #     "10K/98f8220e7d2a2addbacaf26d3b005764e0510ae730ac11182c6e4de15a7e02e4"
+#     "10K/97b769bc525dbc210bbe7a9bb9135ce8a6c87420d56df63649d6f53a031bc833"
 # )
 
 # SCENE_DIR="data/dl3dv-evaluation-frames256"
 # RESULT_DIR="results/benchmark_mcmc_dl3dv-evaluation-frames256"
-SCENE_DIR="data/dl3dv-evaluation-frames256-long"
-RESULT_DIR="results/benchmark_mcmc_dl3dv-evaluation-frames256-long"
+# SCENE_LIST=(
+#     "0ec879405fe1a7a393876fed993657e0f7dda7fa16788ad48c669e9b67215a3c"
+#     "1e5ce991775e9266dcd553306ae9cc153ffd19101b789ff66526bc3877c54fdf"
+# )
+
+# SCENE_DIR="data/dl3dv-evaluation-frames256-long"
+# RESULT_DIR="results/benchmark_mcmc_dl3dv-evaluation-frames256-long"
+# SCENE_LIST=(
+#     "0ec879405fe1a7a393876fed993657e0f7dda7fa16788ad48c669e9b67215a3c"
+#     "1e5ce991775e9266dcd553306ae9cc153ffd19101b789ff66526bc3877c54fdf"
+# )
+
+SCENE_DIR="data/spatialvid-frames256-mini"
+RESULT_DIR="results/benchmark_mcmc_spatialvid-frames256-mini"
 SCENE_LIST=(
-    "0ec879405fe1a7a393876fed993657e0f7dda7fa16788ad48c669e9b67215a3c"
-    "1e5ce991775e9266dcd553306ae9cc153ffd19101b789ff66526bc3877c54fdf"
+    "group_0001/0a00f99d-9d9a-5265-9548-e97a34c1302c"
+    "group_0001/0a7b25d8-41fd-563f-bec3-9fb2b675be3e"
+    "group_0001/0a8a3b80-5c81-59b9-aa70-46ca9b036928"
+    "group_0001/0a8d46c9-b505-59c9-886c-e5ecca276b30"
 )
 
-RENDER_TRAJ_PATH="interp"
+RENDER_TRAJ_PATH="exact"
 CAP_MAX=250000
 DATA_FACTOR=1
 

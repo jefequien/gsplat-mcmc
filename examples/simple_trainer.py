@@ -54,7 +54,7 @@ class Config:
     # Path to the dataset
     data_dir: str = "data/360_v2/garden"
     # Type of the dataset (e.g. COLMAP or Blender)
-    data_type: Literal["colmap", "blender", "realestate10k", "dl3dv"] = "colmap"
+    data_type: Literal["colmap", "blender", "realestate10k", "dl3dv", "rae"] = "colmap"
     # Downsample factor for the dataset
     data_factor: int = 4
     # Directory to save results
@@ -364,12 +364,12 @@ class Runner:
             self.trainset = Realestate10kDataset(cfg.data_dir, split="train")
             self.valset = Realestate10kDataset(cfg.data_dir, split="val")
             self.scene_scale = self.trainset.scene_scale * 1.1 * cfg.global_scale
-        elif cfg.data_type == "dl3dv":
-            from datasets.dl3dv import DL3DVDataset
+        elif cfg.data_type == "rae":
+            from datasets.rae import RAEDataset
 
             self.parser = None
-            self.trainset = DL3DVDataset(cfg.data_dir, split="train")
-            self.valset = DL3DVDataset(cfg.data_dir, split="val")
+            self.trainset = RAEDataset(cfg.data_dir, split="train")
+            self.valset = RAEDataset(cfg.data_dir, split="val")
             self.scene_scale = self.trainset.scene_scale * 1.1 * cfg.global_scale
         print("Scene scale:", self.scene_scale)
 
@@ -1056,6 +1056,8 @@ class Runner:
                 bounds=self.parser.bounds * self.scene_scale,
                 spiral_scale_r=self.parser.extconf["spiral_radius_scale"],
             )
+        elif cfg.render_traj_path == "exact":
+            camtoworlds_traj = camtoworlds[:,:3,:]
         else:
             raise ValueError(
                 f"Render trajectory type not supported: {cfg.render_traj_path}"
@@ -1078,7 +1080,7 @@ class Runner:
         # save to video
         video_dir = f"{cfg.result_dir}/videos"
         os.makedirs(video_dir, exist_ok=True)
-        writer = imageio.get_writer(f"{video_dir}/traj_{step}.mp4", fps=30)
+        writer = imageio.get_writer(f"{video_dir}/traj_{cfg.render_traj_path}_{step}.mp4", fps=30)
         for i in tqdm.trange(len(camtoworlds_traj), desc="Rendering trajectory"):
             camtoworlds = camtoworlds_traj[i : i + 1]
             Ks = K[None]
